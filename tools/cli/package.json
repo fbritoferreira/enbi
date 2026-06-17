@@ -42,9 +42,15 @@
   },
   "devDependencies": {
     "@libsql/client": "catalog:",
+    "@testcontainers/mysql": "catalog:",
+    "@testcontainers/postgresql": "catalog:",
     "@types/node": "^25.6.2",
+    "@types/pg": "catalog:",
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
     "bumpp": "^11.1.0",
+    "mysql2": "catalog:",
+    "pg": "catalog:",
+    "testcontainers": "catalog:",
     "typescript": "^6.0.3",
     "vite-plus": "catalog:"
   },

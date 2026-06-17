@@ -44,6 +44,8 @@ export async function verifyApiKey(
     .limit(1);
   const row = rows[0];
   if (!row) return null;
+  // Record last use (best-effort; auth still succeeds if this fails).
+  await db.update(table).set({ lastUsedAt: new Date().toISOString() }).where(eq(table.id, row.id));
   return { userId: row.id, role: row.role };
 }
 

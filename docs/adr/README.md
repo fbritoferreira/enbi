@@ -40,3 +40,4 @@ to change a decision, add a new ADR that supersedes the old one (don't edit hist
 | [0032](0032-playwright-api-e2e-and-keys.md)           | Playwright API-level e2e (in CI) + `enbi keys`                        | Accepted           |
 | [0033](0033-admin-route-prefix.md)                    | System routes are namespaced under `admin_`                           | Accepted           |
 | [0034](0034-http-key-management.md)                   | HTTP API-key management, admin-gated, first-user bootstrap            | Accepted           |
+| [0035](0035-cross-dialect-testcontainers.md)          | Cross-dialect testing with testcontainers                             | Accepted           |

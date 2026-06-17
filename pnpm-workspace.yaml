@@ -26,6 +26,9 @@ catalog:
   jiti: ^2.7.0
   astro: ^6.4.7
   "@playwright/test": ^1.61.0
+  testcontainers: ^12.0.3
+  "@testcontainers/postgresql": ^12.0.3
+  "@testcontainers/mysql": ^12.0.3
 
 # Supply-chain hardening: no dependency runs lifecycle (postinstall) scripts.
 # Vite+ manages build approvals via `allowBuilds` (below); `false` = acknowledged
@@ -50,6 +53,12 @@ minimumReleaseAgeExclude:
   - "@better-auth/prisma-adapter@1.7.0-beta.6"
   - "@better-auth/telemetry@1.7.0-beta.6"
   - better-auth@1.7.0-beta.6
+  - "@testcontainers/mysql@12.0.3"
+  - "@testcontainers/postgresql@12.0.3"
+  - testcontainers@12.0.3
 allowBuilds:
+  cpu-features: false
   esbuild: false
+  protobufjs: false
   sharp: false
+  ssh2: false

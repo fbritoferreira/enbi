@@ -197,3 +197,12 @@ test("keys: anonymous is 401, missing role is 422", async () => {
   const bad = await app.request("/api/admin_keys", json("admin", { label: "no-role" }));
   expect(bad.status).toBe(422);
 });
+
+test("creating a duplicate id is a conflict (409)", async () => {
+  await app.request("/api/posts", json("editor", { id: "dup", title: "a", views: 0 }));
+  const again = await app.request(
+    "/api/posts",
+    json("editor", { id: "dup", title: "b", views: 0 }),
+  );
+  expect(again.status).toBe(409);
+});

@@ -61,8 +61,12 @@ function mountCollection(
   app.post(base, async (c) => {
     const caller = await authorize(auth, roles, col, "create", c.req.raw.headers);
     const body = asObject(await c.req.json());
+    const id = idOf(body);
+    if (await getRow(ctx.db, col.table, col.primaryKey, id)) {
+      throw new EnbiError("conflict", `${col.name} "${id}" already exists.`);
+    }
     await insertRow(ctx.db, col.table, body);
-    await snapshot(ctx, col, idOf(body), caller.userId);
+    await snapshot(ctx, col, id, caller.userId);
     return c.json(body, 201);
   });
 
