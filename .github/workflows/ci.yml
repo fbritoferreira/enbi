@@ -60,8 +60,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # API-level Playwright e2e against the real built CLI (ADR-0032). No browser
-  # download — only localhost traffic — so the egress allowlist is unchanged.
+  # Playwright e2e against the real built CLI (ADR-0032). The `api` project hits
+  # localhost; the `sso` project (ADR-0036) drives a chromium browser through a
+  # genericOAuth login against a mock OIDC provider pulled as a container.
   e2e:
     runs-on: ubuntu-latest
     permissions:
@@ -79,6 +80,10 @@ jobs:
             viteplus.dev:443
             registry.npmjs.org:443
             nodejs.org:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            playwright.azureedge.net:443
+            cdn.playwright.dev:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
         with:
@@ -87,6 +92,7 @@ jobs:
       - run: corepack enable
       - run: vp install --frozen-lockfile
       - run: vp run -r build
+      - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm exec playwright test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
