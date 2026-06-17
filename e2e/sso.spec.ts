@@ -47,10 +47,12 @@ test.describe("SSO via mock OIDC", () => {
   test.skip(!READY, "mock IdP container unavailable (no Docker)");
 
   test("genericOAuth login establishes a session; first user is admin", async ({ page }) => {
-    // 1. Initiate sign-in. Using page.request keeps better-auth's PKCE/state
-    //    cookies in the browser context so the callback can complete.
-    const init = await page.request.post("/api/admin_auth/sign-in/oauth2", {
-      data: { providerId: "mock", callbackURL: "/health" },
+    // 1. Initiate sign-in. better-auth's genericOAuth has no dedicated endpoint:
+    //    configured SSO providers are driven through the core `/sign-in/social`
+    //    route with `provider: <providerId>`. Using page.request keeps the
+    //    PKCE/state cookies in the browser context so the callback can complete.
+    const init = await page.request.post("/api/admin_auth/sign-in/social", {
+      data: { provider: "mock", callbackURL: "/health" },
     });
     expect(init.ok(), `init ${init.status()}: ${await init.text()}`).toBeTruthy();
     const body = (await init.json()) as { url?: string };
