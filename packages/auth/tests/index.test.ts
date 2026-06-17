@@ -15,6 +15,7 @@ import {
   listApiKeys,
   revokeApiKey,
   type RolesConfig,
+  verifyApiKey,
 } from "../src/index.ts";
 
 async function apiKeyDb() {
@@ -121,6 +122,21 @@ test("issue → verify → list → revoke API keys", async () => {
   expect(await revokeApiKey(ctx.db, ctx.apiKeys, id)).toBe(true);
   expect(await revokeApiKey(ctx.db, ctx.apiKeys, id)).toBe(false);
   expect(await listApiKeys(ctx.db, ctx.apiKeys)).toHaveLength(0);
+});
+
+test("verifyApiKey records last_used_at on success", async () => {
+  const ctx = await apiKeyDb();
+  const { key } = await issueApiKey(ctx.db, ctx.apiKeys, { role: "viewer" });
+  const before = await ctx.db.all<{ last_used_at: string | null }>(
+    sql`SELECT last_used_at FROM _api_keys`,
+  );
+  expect(before[0]?.last_used_at).toBeNull();
+
+  await verifyApiKey(ctx.db, ctx.apiKeys, key);
+  const after = await ctx.db.all<{ last_used_at: string | null }>(
+    sql`SELECT last_used_at FROM _api_keys`,
+  );
+  expect(after[0]?.last_used_at).not.toBeNull();
 });
 
 test("authSchema produces drizzle tables for better-auth's models", () => {

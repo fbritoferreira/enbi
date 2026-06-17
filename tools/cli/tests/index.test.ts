@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collection, createDb, type EnbiConfig, type EnbiDb } from "@enbi/db";
+import { collection, createDb, type EnbiConfig, type EnbiDb, EnbiError } from "@enbi/db";
 import { createServer } from "@enbi/server";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -186,6 +186,17 @@ test("first user created becomes admin; later users get the default role", async
   expect(byEmail["first@x.test"]).toBe("admin");
   expect(byEmail["second@x.test"]).toBe("viewer");
 });
+
+test("enbi build runs the admin build path (or surfaces a typed error)", async () => {
+  const { runBuild } = await import("../src/commands/build.ts");
+  // Either it builds the admin, or throws a typed EnbiError if astro/@enbi/admin
+  // can't be resolved from here. Anything else is a real failure.
+  const outcome = await runBuild().then(
+    () => "built" as const,
+    (error: unknown) => error,
+  );
+  expect(outcome === "built" || outcome instanceof EnbiError).toBe(true);
+}, 120_000);
 
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
