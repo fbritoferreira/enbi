@@ -1,9 +1,21 @@
 // SSO e2e: a full genericOAuth authorization-code login against the mock OIDC
 // provider booted in globalSetup. Skips when the mock container is unavailable
 // (no Docker / Podman locally); runs on CI. See ADR-0036.
+import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 
-const READY = process.env.ENBI_E2E_SSO_READY === "1";
+// The webServer launcher (e2e/start-server.ts) writes this marker after deciding
+// whether the mock OIDC container booted. Skip when it didn't (no Docker locally).
+function ssoReady(): boolean {
+  try {
+    const raw = readFileSync("e2e/.tmp/sso-ready.json", "utf8");
+    return (JSON.parse(raw) as { ready?: boolean }).ready === true;
+  } catch {
+    return false;
+  }
+}
+
+const READY = ssoReady();
 
 // mock-oauth2-server's default `/authorize` renders an interactive login form.
 // This is the first cut at its shape; the real selectors are confirmed from CI
