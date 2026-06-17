@@ -1,5 +1,16 @@
 # @enbi/auth
 
+## 0.4.0
+
+### Minor Changes
+
+- [#11](https://github.com/fbritoferreira/enbi/pull/11) [`19005f9`](https://github.com/fbritoferreira/enbi/commit/19005f92584632a4f102c17970490dc625b3c6b8) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add `enbi keys` (create/list/revoke) and API-key management helpers (`issueApiKey`/`listApiKeys`/`revokeApiKey`). Fix the better-auth Drizzle adapter to receive the generated schema so session signup/login works against migrated tables. Add Playwright API-level e2e (signup/login/session, API-key, denied paths) that boots the real CLI and runs in CI.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @enbi/db@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
