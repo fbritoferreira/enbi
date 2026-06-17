@@ -1,5 +1,12 @@
 # @enbi/core
 
+## 0.4.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @enbi/db@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes

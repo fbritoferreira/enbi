@@ -1,5 +1,14 @@
 # @enbi/server
 
+## 0.4.0
+
+### Patch Changes
+
+- Updated dependencies [[`19005f9`](https://github.com/fbritoferreira/enbi/commit/19005f92584632a4f102c17970490dc625b3c6b8)]:
+  - @enbi/auth@0.4.0
+  - @enbi/core@0.4.0
+  - @enbi/db@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes
