@@ -33,9 +33,12 @@ export async function applyMigrations(
   now?: string,
 ): Promise<string[]> {
   if (!existsSync(dir)) throw new EnbiError("config", `No migrations directory: ${dir}.`);
+  // `varchar(191)` not `text`: MySQL cannot use a TEXT column as a primary key
+  // (ER_BLOB_KEY_WITHOUT_LENGTH); 191 stays within the utf8mb4 index limit and is
+  // portable to SQLite/Postgres.
   await exec(
     ctx,
-    "CREATE TABLE IF NOT EXISTS _enbi_migrations (name text PRIMARY KEY, applied_at text NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS _enbi_migrations (name varchar(191) PRIMARY KEY, applied_at text NOT NULL)",
   );
   const done = await appliedNames(ctx);
   const files = readdirSync(dir)

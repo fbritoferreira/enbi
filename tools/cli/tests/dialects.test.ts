@@ -89,6 +89,12 @@ function dialectSuite(dialect: EnbiDialect): void {
     }, 180_000);
 
     afterAll(async () => {
+      // Close the DB connection before stopping the container, else Postgres/MySQL
+      // raise a connection-terminated error (e.g. pg 57P01) on the open pool.
+      const client = (ctx?.db as { $client?: { end?: () => Promise<void>; close?: () => void } })
+        ?.$client;
+      await client?.end?.();
+      client?.close?.();
       await stop();
     });
 
