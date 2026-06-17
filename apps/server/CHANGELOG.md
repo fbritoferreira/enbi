@@ -1,5 +1,14 @@
 # @enbi/server
 
+## 0.2.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @enbi/auth@0.2.0
+  - @enbi/core@0.2.0
+  - @enbi/db@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

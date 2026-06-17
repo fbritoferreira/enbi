@@ -1,6 +1,6 @@
 {
   "name": "@enbi/db",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Drizzle config surface for enbi (Postgres / SQLite / MySQL).",
   "license": "GPL-2.0-only",
   "repository": {
