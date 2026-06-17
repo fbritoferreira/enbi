@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
@@ -15,4 +16,12 @@ export default defineConfig({
     },
   },
   fmt: {},
+  test: {
+    include: ["tests/**/*.test.ts"],
+    alias: {
+      "@enbi/db": fileURLToPath(new URL("../../packages/db/src/index.ts", import.meta.url)),
+      "@enbi/core": fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
+      "@enbi/auth": fileURLToPath(new URL("../../packages/auth/src/index.ts", import.meta.url)),
+    },
+  },
 });

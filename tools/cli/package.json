@@ -1,9 +1,9 @@
 {
   "name": "@enbi/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The enbi CLI — dev / build / start.",
   "homepage": "https://enbi-cms.com",
-  "license": "MIT",
+  "license": "GPL-2.0-only",
   "bin": {
     "enbi": "./dist/bin/enbi.mjs"
   },

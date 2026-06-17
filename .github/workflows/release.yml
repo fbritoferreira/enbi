@@ -1,8 +1,13 @@
 name: release
 
+# Publish on merge to the default branch (ADR-0023): each package whose version
+# in package.json is not yet on npm is published. Bump a package's version in a
+# PR and merging it releases that version. Tags also trigger a release.
 on:
   push:
+    branches: [main, master]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,14 +25,18 @@ jobs:
       contents: read
       id-token: write # OIDC trusted publishing — NO NPM_TOKEN is stored
     steps:
+      # Audit mode while the endpoint allowlist is being confirmed (ADR-0013).
+      # Flip to `block` together with ci.yml once the audit run is reviewed.
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
-          egress-policy: block
+          egress-policy: audit
           allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            viteplus.dev:443
             registry.npmjs.org:443
             nodejs.org:443
             fulcio.sigstore.dev:443
@@ -39,16 +48,24 @@ jobs:
           node-version: "24"
           cache: true
       - run: vp install --frozen-lockfile
+      - run: vp run -r build
       - run: vp check
       - run: vp run -r test
-      - run: vp run -r build
-      # Trusted publishing (OIDC): no NPM_TOKEN. Dry-run until the npm trusted
-      # publisher is configured per package (see ADR-0008 operational setup).
-      # Flip --dry-run off in the first real release sub-project.
-      - name: Publish (dry-run)
+      # Trusted publishing (OIDC): no NPM_TOKEN, provenance auto-attested.
+      # Idempotent: only versions not already on npm are published, so re-merges
+      # without a version bump are a no-op (ADR-0023). Requires the one-time npm
+      # trusted-publisher + `npm-publish` environment setup (ADR-0008).
+      - name: Publish changed versions
         run: |
+          set -euo pipefail
           for dir in packages/db packages/core packages/auth apps/server apps/admin tools/cli; do
-            echo "::group::publish $dir (dry-run)"
-            (cd "$dir" && npm publish --provenance --access public --dry-run)
-            echo "::endgroup::"
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "::notice::$name@$ver already published — skipping"
+            else
+              echo "::group::publish $name@$ver"
+              (cd "$dir" && npm publish --provenance --access public)
+              echo "::endgroup::"
+            fi
           done

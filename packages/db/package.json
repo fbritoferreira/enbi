@@ -1,8 +1,8 @@
 {
   "name": "@enbi/db",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Drizzle config surface for enbi (Postgres / SQLite / MySQL).",
-  "license": "MIT",
+  "license": "GPL-2.0-only",
   "files": [
     "dist"
   ],
@@ -21,11 +21,22 @@
     "check": "vp check",
     "prepublishOnly": "vp run build"
   },
+  "dependencies": {
+    "drizzle-orm": "catalog:"
+  },
   "devDependencies": {
+    "@libsql/client": "catalog:",
     "@types/node": "^25.6.2",
+    "@types/pg": "catalog:",
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
     "bumpp": "^11.1.0",
+    "drizzle-kit": "catalog:",
     "typescript": "^6.0.3",
     "vite-plus": "catalog:"
+  },
+  "optionalDependencies": {
+    "@libsql/client": "catalog:",
+    "mysql2": "catalog:",
+    "pg": "catalog:"
   }
 }
