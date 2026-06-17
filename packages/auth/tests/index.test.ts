@@ -1,8 +1,10 @@
 import { createDb } from "@enbi/db";
 import { sql } from "drizzle-orm";
 import { expect, test } from "vite-plus/test";
+import { getTableConfig } from "drizzle-orm/sqlite-core";
 import {
   apiKeyProvider,
+  authSchema,
   betterAuthProvider,
   can,
   composeProviders,
@@ -85,6 +87,20 @@ test("composeProviders returns the first matching identity", async () => {
   const yes = { authenticate: () => Promise.resolve({ userId: "u1", role: "admin" }) };
   const composed = composeProviders(never, yes);
   expect(await composed.authenticate(new Headers())).toEqual({ userId: "u1", role: "admin" });
+});
+
+test("authSchema produces drizzle tables for better-auth's models", () => {
+  const schema = authSchema({ secret: "x" }, "sqlite");
+  // Core better-auth tables exist.
+  for (const t of ["user", "session", "account", "verification"]) {
+    expect(schema[t]).toBeDefined();
+  }
+  const user = getTableConfig(schema.user as never);
+  const columns = user.columns.map((c) => c.name);
+  expect(columns).toContain("id");
+  expect(columns).toContain("email");
+  // admin plugin adds a `role` field to user.
+  expect(columns).toContain("role");
 });
 
 test("createAuth boots a better-auth instance with a handler", async () => {

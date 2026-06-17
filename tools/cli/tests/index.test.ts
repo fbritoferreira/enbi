@@ -1,14 +1,16 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collection, createDb, type EnbiDb } from "@enbi/db";
+import { collection, createDb, type EnbiConfig, type EnbiDb } from "@enbi/db";
 import { createServer } from "@enbi/server";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { expect, test } from "vite-plus/test";
-import { runMigrate } from "../src/commands/migrate.ts";
 import { loadConfig, resolveConfigPath } from "../src/config.ts";
 import { getVersion, run } from "../src/index.ts";
+import { applyMigrations } from "../src/migrate/apply.ts";
+import { generateMigration } from "../src/migrate/generate.ts";
+import { assembleSchema } from "../src/migrate/schema.ts";
 import { syncSchema } from "../src/sync.ts";
 
 const posts = sqliteTable("posts", {
@@ -86,10 +88,57 @@ test("dev data path: synced db serves the content API", async () => {
   expect((await list.json()) as unknown[]).toEqual([]);
 });
 
-test("migrate is a stub that throws", () => {
-  expect(() => runMigrate()).toThrow(/coming soon/);
+const cfg = (): EnbiConfig => ({
+  db: { dialect: "sqlite", url: ":memory:" },
+  auth: { secret: "x" },
+  roles: { admin: "*" },
+  collections: [collection(posts, { name: "posts", title: "title" })],
 });
 
-test("run routes `migrate` and surfaces its error", async () => {
-  await expect(run(["node", "enbi", "migrate"])).rejects.toMatchObject({ code: "config" });
+test("assembleSchema includes content, internal, and auth tables", () => {
+  const schema = assembleSchema(cfg(), "sqlite");
+  for (const t of ["posts", "_revisions", "_api_keys", "user", "session"]) {
+    expect(schema[t]).toBeDefined();
+  }
+});
+
+test("generate writes a migration then nothing on a no-op re-run", async () => {
+  const dir = join(mkdtempSync(join(tmpdir(), "enbi-mig-")), "drizzle");
+  const first = await generateMigration(cfg(), "sqlite", dir);
+  expect(first.file).not.toBeNull();
+  expect(first.statements).toBeGreaterThan(0);
+
+  const second = await generateMigration(cfg(), "sqlite", dir);
+  expect(second.file).toBeNull();
+});
+
+test("migrate applies generated files, idempotently", async () => {
+  const dir = join(mkdtempSync(join(tmpdir(), "enbi-mig-")), "drizzle");
+  await generateMigration(cfg(), "sqlite", dir);
+
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const applied = await applyMigrations(ctx, dir, "t0");
+  expect(applied.length).toBe(1);
+
+  const names = (
+    await ctx.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type='table'`)
+  ).map((t) => t.name);
+  expect(names).toContain("posts");
+  expect(names).toContain("user");
+  expect(names).toContain("_revisions");
+
+  // Re-run is a no-op (tracking works).
+  const again = await applyMigrations(ctx, dir, "t1");
+  expect(again).toEqual([]);
+});
+
+test("run routes `migrate` and surfaces a missing-config error", async () => {
+  const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
+  const cwd = process.cwd();
+  process.chdir(empty);
+  try {
+    await expect(run(["node", "enbi", "migrate"])).rejects.toMatchObject({ code: "config" });
+  } finally {
+    process.chdir(cwd);
+  }
 });
