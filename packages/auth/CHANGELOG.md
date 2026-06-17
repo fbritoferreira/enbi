@@ -1,5 +1,14 @@
 # @enbi/auth
 
+## 0.5.1
+
+### Patch Changes
+
+- [#15](https://github.com/fbritoferreira/enbi/pull/15) [`08add8c`](https://github.com/fbritoferreira/enbi/commit/08add8c993bd5c8de18f2d3ca227e1c3fb40bcbb) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Record `last_used_at` when an API key authenticates, and return 409 when creating a content entry whose id already exists. Adds a full-stack cross-dialect test suite (SQLite + Postgres/MySQL via testcontainers) exercising generate → migrate → server → content/versioning + auth bootstrap + key management on every dialect.
+
+- Updated dependencies []:
+  - @enbi/db@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes

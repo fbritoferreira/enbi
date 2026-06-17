@@ -1,6 +1,6 @@
 {
   "name": "@enbi/admin",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": false,
   "description": "Astro admin UI for enbi (talks to @enbi/server over HTTP).",
   "homepage": "https://enbi-cms.com",
