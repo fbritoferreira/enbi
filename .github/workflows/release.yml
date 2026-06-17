@@ -54,6 +54,11 @@ jobs:
         with:
           node-version: "24"
           cache: true
+      # setup-vp manages pnpm internally for `vp`, but does not put `pnpm` on
+      # PATH for plain run-steps. Corepack provides the pinned pnpm (from the
+      # `packageManager` field) without invoking npm (which the pnpm devEngines
+      # guard would reject).
+      - run: corepack enable
       - run: vp install --frozen-lockfile
       - run: vp run -r build
       # Manages the "Version Packages" PR when changesets are pending. Publishing
