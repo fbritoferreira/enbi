@@ -21,15 +21,10 @@ catalog:
   "@types/pg": ^8.20.0
   mysql2: ^3.22.5
 
-# Supply-chain hardening: no dependency may run lifecycle (postinstall) scripts
-# unless explicitly allowlisted here. (ADR-0008)
+# Supply-chain hardening: no dependency runs lifecycle (postinstall) scripts.
+# Vite+ manages build approvals via `allowBuilds` (below); `false` = acknowledged
+# and NOT built. (ADR-0008)
 onlyBuiltDependencies: []
-# Explicitly acknowledge these deps' build scripts as intentionally NOT run, so
-# `pnpm install --frozen-lockfile` doesn't error (ERR_PNPM_IGNORED_BUILDS) in CI.
-# enbi never needs their native binaries (Vite+ uses rolldown/oxc).
-ignoredBuiltDependencies:
-  - esbuild
-  - sharp
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
@@ -49,3 +44,6 @@ minimumReleaseAgeExclude:
   - "@better-auth/prisma-adapter@1.7.0-beta.6"
   - "@better-auth/telemetry@1.7.0-beta.6"
   - better-auth@1.7.0-beta.6
+allowBuilds:
+  esbuild: false
+  sharp: false
