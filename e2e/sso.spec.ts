@@ -15,6 +15,13 @@ async function completeMockLogin(page: Page): Promise<void> {
   const username = page.locator('input[name="username"], input#username').first();
   if (await username.count()) {
     await username.fill("e2e-admin");
+    // The mock's default token carries only `sub`/`tid`; better-auth needs an
+    // email (and name) to create the user, so inject them via the optional
+    // `claims` field the login form exposes.
+    const claims = page.locator('[name="claims"]').first();
+    if (await claims.count()) {
+      await claims.fill('{"email":"e2e-admin@enbi.test","name":"E2E Admin"}');
+    }
     await page.locator('button[type="submit"], input[type="submit"]').first().click();
     return;
   }
