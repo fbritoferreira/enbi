@@ -37,3 +37,4 @@ to change a decision, add a new ADR that supersedes the old one (don't edit hist
 | [0029](0029-cli-drives-astro-programmatically.md)     | The CLI drives the Astro admin via Astro's programmatic API           | Accepted           |
 | [0030](0030-versioned-migrations.md)                  | Versioned migration files with a lightweight apply runner             | Accepted           |
 | [0031](0031-unify-auth-tables-into-drizzle-schema.md) | Unify better-auth tables into the drizzle schema via `getSchema`      | Accepted           |
+| [0032](0032-playwright-api-e2e-and-keys.md)           | Playwright API-level e2e (in CI) + `enbi keys`                        | Accepted           |

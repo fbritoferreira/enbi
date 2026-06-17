@@ -10,11 +10,16 @@
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "pnpm publish -r --no-git-checks",
+    "e2e": "playwright test",
     "prepare": "vp config"
   },
   "devDependencies": {
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
+    "@enbi/db": "workspace:*",
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:",
+    "drizzle-orm": "catalog:",
     "vite-plus": "catalog:"
   },
   "devEngines": {

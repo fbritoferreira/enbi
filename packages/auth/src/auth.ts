@@ -5,6 +5,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, genericOAuth } from "better-auth/plugins";
 import type { AuthProvider, Identity } from "./provider.ts";
+import { authSchema } from "./schema.ts";
 
 const DRIZZLE_PROVIDER: Record<EnbiDialect, "sqlite" | "pg" | "mysql"> = {
   sqlite: "sqlite",
@@ -65,7 +66,12 @@ export function buildAuthOptions(authConfig: EnbiAuthConfig): EnbiAuthOptions {
 
 export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
   return betterAuth({
-    database: drizzleAdapter(ctx.db, { provider: DRIZZLE_PROVIDER[ctx.dialect] }),
+    database: drizzleAdapter(ctx.db, {
+      provider: DRIZZLE_PROVIDER[ctx.dialect],
+      // Pass the same tables `authSchema` generates for migrations so the adapter
+      // resolves models (user/session/account/...) (ADR-0031).
+      schema: authSchema(authConfig, ctx.dialect),
+    }),
     ...buildAuthOptions(authConfig),
   } as never) as unknown as EnbiAuth;
 }

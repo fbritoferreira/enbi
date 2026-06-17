@@ -4,6 +4,7 @@ import pkg from "../package.json" with { type: "json" };
 import { runBuild } from "./commands/build.ts";
 import { runDev } from "./commands/dev.ts";
 import { runGenerate } from "./commands/generate.ts";
+import { runKeys } from "./commands/keys.ts";
 import { runMigrate } from "./commands/migrate.ts";
 import { runStart } from "./commands/start.ts";
 
@@ -49,6 +50,19 @@ export async function run(argv: string[]): Promise<void> {
     .option("--dir <path>", "Migrations directory")
     .action((flags: CommonFlags & { dir?: string }) =>
       runMigrate({ config: flags.config, dir: flags.dir }),
+    );
+
+  cli
+    .command("keys <action> [id]", "Manage API keys (create | list | revoke <id>)")
+    .option("--config <path>", "Path to enbi.config.ts")
+    .option("--role <role>", "Role for the new key (create)")
+    .option("--label <label>", "Label for the new key (create)")
+    .action(
+      (
+        action: string,
+        id: string | undefined,
+        flags: CommonFlags & { role?: string; label?: string },
+      ) => runKeys(action, id, { config: flags.config, role: flags.role, label: flags.label }),
     );
 
   cli.help();

@@ -11,8 +11,19 @@ import {
   createAuth,
   generateApiKey,
   hashApiKey,
+  issueApiKey,
+  listApiKeys,
+  revokeApiKey,
   type RolesConfig,
 } from "../src/index.ts";
+
+async function apiKeyDb() {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  return ctx;
+}
 
 const roles: RolesConfig = {
   admin: "*",
@@ -87,6 +98,29 @@ test("composeProviders returns the first matching identity", async () => {
   const yes = { authenticate: () => Promise.resolve({ userId: "u1", role: "admin" }) };
   const composed = composeProviders(never, yes);
   expect(await composed.authenticate(new Headers())).toEqual({ userId: "u1", role: "admin" });
+});
+
+test("issue → verify → list → revoke API keys", async () => {
+  const ctx = await apiKeyDb();
+  const { id, key } = await issueApiKey(ctx.db, ctx.apiKeys, { role: "editor", label: "ci" });
+  expect(key.startsWith("enbi_")).toBe(true);
+
+  // The minted key authenticates with its role.
+  const identity = await apiKeyProvider(ctx.db, ctx.apiKeys).authenticate(
+    new Headers({ "x-api-key": key }),
+  );
+  expect(identity).toEqual({ userId: id, role: "editor" });
+
+  // List shows metadata, never the hash.
+  const keys = await listApiKeys(ctx.db, ctx.apiKeys);
+  expect(keys).toHaveLength(1);
+  expect(keys[0]).toMatchObject({ id, role: "editor", label: "ci" });
+  expect(JSON.stringify(keys[0])).not.toContain(hashApiKey(key));
+
+  // Revoke removes it.
+  expect(await revokeApiKey(ctx.db, ctx.apiKeys, id)).toBe(true);
+  expect(await revokeApiKey(ctx.db, ctx.apiKeys, id)).toBe(false);
+  expect(await listApiKeys(ctx.db, ctx.apiKeys)).toHaveLength(0);
 });
 
 test("authSchema produces drizzle tables for better-auth's models", () => {
