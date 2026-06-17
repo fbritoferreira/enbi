@@ -46,7 +46,7 @@ async function completeMockLogin(page: Page): Promise<void> {
 test.describe("SSO via mock OIDC", () => {
   test.skip(!READY, "mock IdP container unavailable (no Docker)");
 
-  test("genericOAuth login establishes a session; first user is admin", async ({ page }) => {
+  test("genericOAuth login creates a user and establishes a session", async ({ page }) => {
     // 1. Initiate sign-in. better-auth's genericOAuth has no dedicated endpoint:
     //    configured SSO providers are driven through the core `/sign-in/social`
     //    route with `provider: <providerId>`. Using page.request keeps the
@@ -65,11 +65,15 @@ test.describe("SSO via mock OIDC", () => {
     // 3. We should land back on the callbackURL with a session set.
     await page.waitForURL("**/health", { timeout: 15_000 });
 
-    // 4. Session is established and the first SSO user is admin (bootstrap hook).
+    // 4. The SSO login created a user and a live session. The user gets the
+    //    default role: this server's db is shared with the `api` specs, which
+    //    already created users, so the SSO user is NOT the first user — the
+    //    first-user→admin bootstrap (ADR-0034) is covered by the @enbi/cli unit
+    //    test, which can isolate a fresh db. Here we prove the full SSO flow.
     const session = await page.request.get("/api/admin_auth/get-session");
     expect(session.ok(), `session ${session.status()}: ${await session.text()}`).toBeTruthy();
     const data = (await session.json()) as { user?: { id?: string; role?: string } };
     expect(data.user?.id, "expected a logged-in user").toBeTruthy();
-    expect(data.user?.role).toBe("admin");
+    expect(data.user?.role).toBe("viewer");
   });
 });
