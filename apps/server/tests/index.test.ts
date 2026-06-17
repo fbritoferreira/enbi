@@ -162,3 +162,38 @@ test("admin can delete", async () => {
   const after = await app.request("/api/posts/p1", { headers: { "x-role": "viewer" } });
   expect(after.status).toBe(404);
 });
+
+test("keys: admin can create, list, and delete via HTTP", async () => {
+  const create = await app.request(
+    "/api/admin_keys",
+    json("admin", { role: "viewer", label: "ci" }),
+  );
+  expect(create.status).toBe(201);
+  const { id, key } = (await create.json()) as { id: string; key: string };
+  expect(key.startsWith("enbi_")).toBe(true);
+
+  const list = (await (
+    await app.request("/api/admin_keys", { headers: { "x-role": "admin" } })
+  ).json()) as unknown[];
+  expect(list).toHaveLength(1);
+
+  const del = await app.request(`/api/admin_keys/${id}`, {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(del.status).toBe(204);
+});
+
+test("keys: viewer (read shorthand) is forbidden — admin-only", async () => {
+  expect((await app.request("/api/admin_keys", { headers: { "x-role": "viewer" } })).status).toBe(
+    403,
+  );
+  const create = await app.request("/api/admin_keys", json("viewer", { role: "viewer" }));
+  expect(create.status).toBe(403);
+});
+
+test("keys: anonymous is 401, missing role is 422", async () => {
+  expect((await app.request("/api/admin_keys")).status).toBe(401);
+  const bad = await app.request("/api/admin_keys", json("admin", { label: "no-role" }));
+  expect(bad.status).toBe(422);
+});
