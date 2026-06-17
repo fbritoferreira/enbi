@@ -31,13 +31,23 @@
     "prepublishOnly": "vp run build"
   },
   "dependencies": {
-    "@enbi/server": "workspace:*"
+    "@enbi/db": "workspace:*",
+    "@enbi/server": "workspace:*",
+    "@hono/node-server": "catalog:",
+    "cac": "catalog:",
+    "drizzle-kit": "catalog:",
+    "jiti": "catalog:"
   },
   "devDependencies": {
+    "@libsql/client": "catalog:",
     "@types/node": "^25.6.2",
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
     "bumpp": "^11.1.0",
+    "drizzle-orm": "catalog:",
     "typescript": "^6.0.3",
     "vite-plus": "catalog:"
+  },
+  "optionalDependencies": {
+    "astro": "catalog:"
   }
 }
