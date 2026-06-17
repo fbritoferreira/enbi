@@ -1,5 +1,16 @@
 # @enbi/auth
 
+## 0.5.0
+
+### Minor Changes
+
+- [#13](https://github.com/fbritoferreira/enbi/pull/13) [`220ddda`](https://github.com/fbritoferreira/enbi/commit/220dddaacb8fa696d61a18d2934c63331c70b1f1) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add HTTP API-key management at `/api/admin_keys` (`GET` list / `POST` create / `DELETE` revoke), gated by a `keys` permission resource — admin-only (the `read` role shorthand does not grant it). The first user created is promoted to `admin` so a fresh install has a super-admin without a manual DB edit. Covered by server unit tests and Playwright e2e.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @enbi/db@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes
