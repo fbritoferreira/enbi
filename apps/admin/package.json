@@ -1,10 +1,10 @@
 {
   "name": "@enbi/admin",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Astro admin UI for enbi (talks to @enbi/server over HTTP).",
   "homepage": "https://enbi-cms.com",
-  "license": "MIT",
+  "license": "GPL-2.0-only",
   "type": "module",
   "publishConfig": {
     "access": "public"

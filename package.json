@@ -2,13 +2,19 @@
   "name": "enbi",
   "version": "0.0.0",
   "private": true,
+  "license": "GPL-2.0-only",
   "type": "module",
   "scripts": {
-    "ready": "vp check && vp run -r test && vp run -r build",
+    "ready": "vp run -r build && vp check && vp run -r test",
     "dev": "vp run -r --parallel dev",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish",
     "prepare": "vp config"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "catalog:",
+    "@changesets/cli": "catalog:",
     "vite-plus": "catalog:"
   },
   "devEngines": {

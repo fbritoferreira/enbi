@@ -22,14 +22,19 @@ jobs:
       contents: read
     steps:
       # Pinned to commit SHAs (ADR-0008). Bump via Renovate/Dependabot.
+      # Egress is in AUDIT mode while we enumerate every endpoint setup-vp + the
+      # vp tool downloads touch; flip to `block` once the audit run confirms the
+      # full allowlist. Known-required endpoints are listed for that switch. (ADR-0013)
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
-          egress-policy: block
+          egress-policy: audit
           allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            viteplus.dev:443
             registry.npmjs.org:443
             nodejs.org:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -38,9 +43,10 @@ jobs:
           node-version: "24"
           cache: true
       - run: vp install --frozen-lockfile
+      # Build first: type-checking resolves workspace deps to their built dist types.
+      - run: vp run -r build
       - run: vp check
       - run: vp run -r test
-      - run: vp run -r build
       # PR build artifacts: reviewers can download the built packages + admin site.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ always() }}

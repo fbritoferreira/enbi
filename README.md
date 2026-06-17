@@ -59,4 +59,9 @@ vp run ready            # vp check && vp run -r test && vp run -r build
 
 ## Status
 
-Early scaffolding. Subsystems are built one at a time; each has its own spec, plan, and ADRs.
+Early development. Subsystems are built one at a time; each has its own spec, plan, and ADRs.
+
+## License
+
+enbi is licensed under the **GNU General Public License v2.0** (`GPL-2.0-only`) — see [`LICENSE`](LICENSE).
+Contributions require a signed [CLA](CLA.md), enforced automatically on every pull request.

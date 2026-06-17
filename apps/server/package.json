@@ -1,9 +1,9 @@
 {
   "name": "@enbi/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Hono content API for enbi.",
   "homepage": "https://enbi-cms.com",
-  "license": "MIT",
+  "license": "GPL-2.0-only",
   "files": [
     "dist"
   ],
@@ -29,9 +29,11 @@
     "@enbi/core": "workspace:*",
     "@enbi/db": "workspace:*",
     "@hono/node-server": "catalog:",
+    "drizzle-orm": "catalog:",
     "hono": "catalog:"
   },
   "devDependencies": {
+    "@libsql/client": "catalog:",
     "@types/node": "^25.6.2",
     "@typescript/native-preview": "7.0.0-dev.20260509.2",
     "bumpp": "^11.1.0",
