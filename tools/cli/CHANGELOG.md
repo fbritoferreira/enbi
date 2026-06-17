@@ -1,5 +1,14 @@
 # @enbi/cli
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [[`08add8c`](https://github.com/fbritoferreira/enbi/commit/08add8c993bd5c8de18f2d3ca227e1c3fb40bcbb)]:
+  - @enbi/auth@0.5.1
+  - @enbi/server@0.5.1
+  - @enbi/db@0.5.1
+
 ## 0.5.0
 
 ### Patch Changes
