@@ -5,6 +5,11 @@
   "description": "Astro admin UI for enbi (talks to @enbi/server over HTTP).",
   "homepage": "https://enbi-cms.com",
   "license": "GPL-2.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fbritoferreira/enbi.git",
+    "directory": "apps/admin"
+  },
   "type": "module",
   "publishConfig": {
     "access": "public"
