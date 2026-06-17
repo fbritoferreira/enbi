@@ -1,12 +1,17 @@
 // @enbi/auth — authentication + RBAC for enbi (ADR-0005, ADR-0017, ADR-0019, ADR-0020).
 export {
+  type ApiKeyRecord,
   apiKeyProvider,
   composeProviders,
   generateApiKey,
   hashApiKey,
+  issueApiKey,
+  listApiKeys,
+  revokeApiKey,
   verifyApiKey,
 } from "./apikey.ts";
 export {
+  AUTH_BASE_PATH,
   betterAuthProvider,
   buildAuthOptions,
   createAuth,

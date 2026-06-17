@@ -30,3 +30,7 @@ dist-ssr
 !.vscode/settings.json
 !.vscode/extensions.json
 docs/superpowers
+e2e/.tmp
+e2e/drizzle
+test-results
+playwright-report

@@ -48,6 +48,13 @@ function resolvePrimaryKey(name: string, table: Table): string {
 }
 
 export function collection<T extends Table>(table: T, options: CollectionOptions): Collection<T> {
+  if (options.name.startsWith("admin_")) {
+    // Reserved namespace for system routes like /api/admin_auth (ADR-0033).
+    throw new EnbiError(
+      "config",
+      `Collection name "${options.name}" must not start with "admin_".`,
+    );
+  }
   return {
     table,
     name: options.name,

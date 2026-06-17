@@ -1,9 +1,16 @@
 // @enbi/auth — native API-key auth (ADR-0020). Keys are presented as
 // `x-api-key` or `Authorization: Bearer <key>`; only a SHA-256 hash is stored.
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { type ApiKeysTable, type EnbiDatabase } from "@enbi/db";
 import { eq } from "drizzle-orm";
 import type { AuthProvider, Identity } from "./provider.ts";
+
+export type ApiKeyRecord = {
+  id: string;
+  role: string;
+  label: string | null;
+  createdAt: string;
+};
 
 const PREFIX = "enbi_";
 
@@ -48,6 +55,55 @@ export function apiKeyProvider(db: EnbiDatabase, table: ApiKeysTable): AuthProvi
       return key ? verifyApiKey(db, table, key) : Promise.resolve(null);
     },
   };
+}
+
+/** Mint an API key: store only its hash, return the plaintext once. */
+export async function issueApiKey(
+  db: EnbiDatabase,
+  table: ApiKeysTable,
+  options: { role: string; label?: string; now?: string },
+): Promise<{ id: string; key: string }> {
+  const key = generateApiKey();
+  const id = randomUUID();
+  await db.insert(table).values({
+    id,
+    hashedKey: hashApiKey(key),
+    role: options.role,
+    label: options.label ?? null,
+    createdAt: options.now ?? new Date().toISOString(),
+    lastUsedAt: null,
+  });
+  return { id, key };
+}
+
+/** List stored keys (metadata only — never the hash). */
+export async function listApiKeys(db: EnbiDatabase, table: ApiKeysTable): Promise<ApiKeyRecord[]> {
+  const rows = await db
+    .select({
+      id: table.id,
+      role: table.role,
+      label: table.label,
+      createdAt: table.createdAt,
+    })
+    .from(table);
+  return rows.map((r) => ({
+    id: r.id,
+    role: r.role,
+    label: r.label ?? null,
+    createdAt: r.createdAt,
+  }));
+}
+
+/** Revoke a key by id; returns whether a key was deleted. */
+export async function revokeApiKey(
+  db: EnbiDatabase,
+  table: ApiKeysTable,
+  id: string,
+): Promise<boolean> {
+  const existing = await db.select({ id: table.id }).from(table).where(eq(table.id, id)).limit(1);
+  if (existing.length === 0) return false;
+  await db.delete(table).where(eq(table.id, id));
+  return true;
 }
 
 /** Try each provider in order; first non-null identity wins. */

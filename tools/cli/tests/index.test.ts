@@ -132,6 +132,32 @@ test("migrate applies generated files, idempotently", async () => {
   expect(again).toEqual([]);
 });
 
+test("keys create → list → revoke via runKeys", async () => {
+  const { runKeys } = await import("../src/commands/keys.ts");
+  const dir = mkdtempSync(join(tmpdir(), "enbi-keys-"));
+  writeFileSync(
+    join(dir, "enbi.config.ts"),
+    `export default { db: { dialect: "sqlite", url: "file:${join(dir, "k.db").replaceAll("\\\\", "/")}" }, auth: { secret: "x" }, roles: { admin: "*" }, collections: [] };`,
+  );
+  // Tables must exist first.
+  const { createDb } = await import("@enbi/db");
+  const ctx = await createDb({ dialect: "sqlite", url: `file:${join(dir, "k.db")}` });
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+
+  await runKeys("create", undefined, { cwd: dir, role: "admin", label: "t" });
+  const after = await createDb({ dialect: "sqlite", url: `file:${join(dir, "k.db")}` });
+  const rows = await after.db.all<{ role: string }>(sql`SELECT role FROM _api_keys`);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.role).toBe("admin");
+
+  // Unknown action throws a typed error.
+  await expect(runKeys("nope", undefined, { cwd: dir })).rejects.toMatchObject({
+    code: "validation",
+  });
+});
+
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
   const cwd = process.cwd();

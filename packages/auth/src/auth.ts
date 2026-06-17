@@ -5,6 +5,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, genericOAuth } from "better-auth/plugins";
 import type { AuthProvider, Identity } from "./provider.ts";
+import { authSchema } from "./schema.ts";
 
 const DRIZZLE_PROVIDER: Record<EnbiDialect, "sqlite" | "pg" | "mysql"> = {
   sqlite: "sqlite",
@@ -13,6 +14,13 @@ const DRIZZLE_PROVIDER: Record<EnbiDialect, "sqlite" | "pg" | "mysql"> = {
 };
 
 export const DEFAULT_ROLE = "viewer";
+
+/**
+ * System routes are namespaced under `admin_` so they can never collide with a
+ * user content collection at `/api/:collection` (ADR-0033). better-auth is
+ * mounted (and configured) at this base path.
+ */
+export const AUTH_BASE_PATH = "/api/admin_auth";
 
 /**
  * The slice of the better-auth instance the framework uses. Declared explicitly
@@ -65,7 +73,13 @@ export function buildAuthOptions(authConfig: EnbiAuthConfig): EnbiAuthOptions {
 
 export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
   return betterAuth({
-    database: drizzleAdapter(ctx.db, { provider: DRIZZLE_PROVIDER[ctx.dialect] }),
+    database: drizzleAdapter(ctx.db, {
+      provider: DRIZZLE_PROVIDER[ctx.dialect],
+      // Pass the same tables `authSchema` generates for migrations so the adapter
+      // resolves models (user/session/account/...) (ADR-0031).
+      schema: authSchema(authConfig, ctx.dialect),
+    }),
+    basePath: AUTH_BASE_PATH,
     ...buildAuthOptions(authConfig),
   } as never) as unknown as EnbiAuth;
 }

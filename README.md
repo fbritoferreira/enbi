@@ -17,17 +17,35 @@ vendor the framework source.
 `enbi` is the **framework source** — a [Vite+](https://viteplus.dev) monorepo. End-users do not
 clone this; they install the published `@enbi/*` packages.
 
-| Package        | Role                                                                 |
-| -------------- | -------------------------------------------------------------------- |
-| `@enbi/db`     | Drizzle config surface + driver adapters (Postgres / SQLite / MySQL) |
-| `@enbi/core`   | Content history / snapshot versioning engine                         |
-| `@enbi/auth`   | better-auth wiring (incl. SSO)                                       |
-| `@enbi/server` | Hono content API                                                     |
-| `@enbi/admin`  | Astro admin UI (talks to the server over HTTP)                       |
-| `@enbi/cli`    | The `enbi` binary — `dev` / `build` / `start`                        |
+| Package        | Role                                                                            |
+| -------------- | ------------------------------------------------------------------------------- |
+| `@enbi/db`     | Drizzle config surface + driver adapters (Postgres / SQLite / MySQL)            |
+| `@enbi/core`   | Content history / snapshot versioning engine                                    |
+| `@enbi/auth`   | better-auth wiring (incl. SSO)                                                  |
+| `@enbi/server` | Hono content API                                                                |
+| `@enbi/admin`  | Astro admin UI (talks to the server over HTTP)                                  |
+| `@enbi/cli`    | The `enbi` binary — `dev` / `build` / `start` / `generate` / `migrate` / `keys` |
 
 Dependency direction is acyclic: `cli → server → {core, auth, db}`; the admin only ever talks to
 the server over HTTP.
+
+## Using enbi (end-user)
+
+Install the packages, write an `enbi.config.ts`, then drive it with the CLI:
+
+```bash
+enbi generate   # write a versioned migration from your schema (./drizzle)
+enbi migrate    # apply pending migrations to your database
+enbi dev        # auto-sync schema + run the content server and admin
+enbi start      # production server
+enbi keys create --role admin --label ci   # mint an API key (shown once)
+enbi keys list
+enbi keys revoke <id>
+```
+
+Auth (sessions, social, SSO) is better-auth, served at `/api/admin_auth/*`; API keys and a `public`
+role are built in. Content is served as auto-generated REST per collection, with full revision
+history. System routes are namespaced under `admin_` (so a collection can't be named `auth`/`keys`).
 
 ## Toolchain
 
@@ -48,7 +66,13 @@ vp run -r --parallel dev  # run all dev servers
 A one-shot "is it green?" gate:
 
 ```bash
-vp run ready            # vp check && vp run -r test && vp run -r build
+vp run ready            # vp run -r build && vp check && vp run -r test
+```
+
+End-to-end tests (Playwright, API-level against the real CLI server) run in CI and locally:
+
+```bash
+pnpm e2e                # boots `enbi migrate && enbi start`, hits it over HTTP
 ```
 
 ## Documentation
