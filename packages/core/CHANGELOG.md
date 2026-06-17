@@ -1,5 +1,12 @@
 # @enbi/core
 
+## 0.3.0
+
+### Patch Changes
+
+- Updated dependencies [[`bb0d24c`](https://github.com/fbritoferreira/enbi/commit/bb0d24c3bf19020f03a0d386c43134b6f21388cc)]:
+  - @enbi/db@0.3.0
+
 ## 0.2.0
 
 ### Patch Changes
