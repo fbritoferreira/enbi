@@ -9,7 +9,7 @@
     "dev": "vp run -r --parallel dev",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "changeset publish",
+    "release": "pnpm publish -r --no-git-checks",
     "prepare": "vp config"
   },
   "devDependencies": {

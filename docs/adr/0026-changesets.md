@@ -18,16 +18,21 @@ Adopt changesets:
 
 - Contributors run `vp run changeset` to record a bump (patch/minor/major) + summary; the file is
   committed with the PR.
-- `release.yml` (push to `main`) runs `changesets/action` (SHA-pinned): if changesets are pending it
-  opens/updates a **Version Packages** PR (applies bumps, writes per-package `CHANGELOG.md` via
-  `@changesets/changelog-github`); when none are pending it runs `changeset publish` → publishes
-  changed packages and creates **GitHub Releases**. All in one job, so no cross-workflow trigger and
-  no `GITHUB_TOKEN` retrigger problem.
+- `release.yml` (push to `main`) runs `changesets/action` (SHA-pinned) for the **Version Packages**
+  PR only (bumps + per-package `CHANGELOG.md` via `@changesets/changelog-github`). When no changesets
+  are pending (`hasChangesets == false`), a follow-up step **publishes with `pnpm publish -r`**, then
+  `pnpm exec changeset tag` + `gh release create` to tag and cut **GitHub Releases**. All in one job,
+  so no cross-workflow trigger / `GITHUB_TOKEN` retrigger problem.
+- **Publishing uses pnpm, not `changeset publish`.** `changeset publish` shells out to `npm`, and
+  this repo's root `devEngines.packageManager: pnpm` makes npm abort with `EBADDEVENGINES`
+  ("Invalid name pnpm does not match npm"). `pnpm publish -r` honors the pnpm guard and is pnpm's
+  own recommended flow (pnpm.io/using-changesets). This was a real CI failure on the first release.
 - All `@enbi/*` packages are versioned in lockstep (`fixed` group), `access: public`.
-- **Publishing uses npm OIDC trusted publishing**: the job has `id-token: write`, sets
-  `NPM_CONFIG_PROVENANCE=true`, and stores **no `NPM_TOKEN`**. `changeset publish` shells out to
-  `npm publish`, which performs the OIDC handshake when the registry has a trusted publisher
-  configured for this workflow. Runs inside the human-gated `npm-publish` environment (ADR-0008).
+- **OIDC trusted publishing**: the job has `id-token: write`, sets `NPM_CONFIG_PROVENANCE=true`, and
+  stores **no `NPM_TOKEN`** (the action logged "OIDC is available - using npm trusted publishing").
+  Runs inside the human-gated `npm-publish` environment (ADR-0008). Note: OIDC support via
+  `pnpm publish` should be confirmed on the first real publish; if unsupported by the pinned pnpm,
+  fall back to a short-lived token or `changeset publish` with `devEngines` relaxed.
 
 `publish.yml` and the root `CHANGELOG.md` are removed; changesets owns both.
 

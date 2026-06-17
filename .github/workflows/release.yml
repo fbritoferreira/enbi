@@ -1,11 +1,14 @@
 name: release
 
-# Changesets-driven release (ADR-0026). On push to main:
-#  - if changesets are pending, opens/updates a "Version Packages" PR that bumps
-#    versions and writes per-package CHANGELOGs;
-#  - if none are pending (i.e. that PR was merged, or versions are ahead of npm),
-#    publishes changed packages to npm via OIDC and creates GitHub Releases.
-# One workflow, no cross-workflow trigger needed.
+# Changesets-driven release, pnpm-native (ADR-0026, pnpm.io/using-changesets).
+# On push to main:
+#  - if changesets are pending, the action opens/updates a "Version Packages" PR
+#    (bumps + per-package CHANGELOGs);
+#  - if none are pending, publish with `pnpm publish -r` (OIDC, no token), then
+#    tag and cut GitHub Releases.
+# Publishing uses pnpm (not `changeset publish`) so the repo's pnpm `devEngines`
+# guard is respected — `changeset publish` shells out to npm, which rejects
+# `devEngines.packageManager: pnpm` (EBADDEVENGINES).
 on:
   push:
     branches: [main]
@@ -53,12 +56,34 @@ jobs:
           cache: true
       - run: vp install --frozen-lockfile
       - run: vp run -r build
-      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
+      # Manages the "Version Packages" PR when changesets are pending. Publishing
+      # is handled by the next step (pnpm), so no `publish` input here.
+      - id: changesets
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
         with:
-          version: vp run version-packages
-          publish: vp run release
-          createGithubReleases: true
+          version: pnpm run version-packages
+          createGithubReleases: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # OIDC trusted publishing: no NPM_TOKEN. Provenance is attested.
+      # When there are no pending changesets, the released versions are current:
+      # publish via pnpm (OIDC), then tag and create GitHub Releases.
+      - name: Publish to npm and create GitHub Releases
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          set -euo pipefail
+          # Idempotent: pnpm publishes only versions not already on the registry.
+          pnpm publish -r --no-git-checks --access public
+          # Create git tags for the current package versions and push them.
+          pnpm exec changeset tag
+          git push --tags --no-verify
+          # A GitHub Release per new tag, with auto-generated notes.
+          for tag in $(git tag --points-at HEAD); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "::notice::release $tag already exists — skipping"
+            else
+              gh release create "$tag" --title "$tag" --generate-notes
+            fi
+          done
