@@ -1,0 +1,71 @@
+name: publish
+
+# Listens for a published GitHub Release and publishes to npm (ADR-0025).
+# This is the only workflow that publishes packages. It builds, checks, tests,
+# then publishes — via OIDC trusted publishing, version-gated and idempotent.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Human-gated environment; OIDC subject is bound to it (ADR-0008).
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing — NO NPM_TOKEN is stored
+    steps:
+      # Audit mode while the endpoint allowlist is being confirmed (ADR-0013).
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
+        with:
+          egress-policy: audit
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            viteplus.dev:443
+            registry.npmjs.org:443
+            nodejs.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+      # Check out the exact tag the release points at.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp install --frozen-lockfile
+      - run: vp run -r build
+      - run: vp check
+      - run: vp run -r test
+      # Trusted publishing (OIDC): no NPM_TOKEN, provenance auto-attested.
+      # Idempotent: only versions not already on npm are published, so a re-run
+      # is a no-op. Requires the one-time npm trusted-publisher + `npm-publish`
+      # environment setup (ADR-0008).
+      - name: Publish changed versions
+        run: |
+          set -euo pipefail
+          for dir in packages/db packages/core packages/auth apps/server apps/admin tools/cli; do
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "::notice::$name@$ver already published — skipping"
+            else
+              echo "::group::publish $name@$ver"
+              (cd "$dir" && npm publish --provenance --access public)
+              echo "::endgroup::"
+            fi
+          done

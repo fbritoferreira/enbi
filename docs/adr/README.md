@@ -29,3 +29,5 @@ to change a decision, add a new ADR that supersedes the old one (don't edit hist
 | [0021](0021-gpl-2-license.md)                    | License the project under GPL-2.0-only                                | Accepted |
 | [0022](0022-cla-in-ci.md)                        | Require a signed CLA, enforced in CI                                  | Accepted |
 | [0023](0023-publish-on-merge.md)                 | Publish to npm on merge to the default branch                         | Accepted |
+| [0024](0024-github-release-and-changelog.md)     | Each npm release also cuts a GitHub Release with a changelog          | Accepted |
+| [0025](0025-release-triggered-publish.md)        | npm publish is triggered by the GitHub Release event                  | Accepted |

@@ -1,12 +1,16 @@
 name: release
 
-# Publish on merge to the default branch (ADR-0023): each package whose version
-# in package.json is not yet on npm is published. Bump a package's version in a
-# PR and merging it releases that version. Tags also trigger a release.
+# Cut a GitHub Release when the repo-wide version is bumped on the default branch
+# (ADR-0023, ADR-0025). This does NOT publish to npm — `publish.yml` listens for
+# the release event and does that. Can also be run manually.
+#
+# Note: a release created with the default GITHUB_TOKEN does not re-trigger other
+# workflows (GitHub loop-prevention). To auto-trigger `publish.yml`, set a
+# `RELEASE_PAT` secret; otherwise publish the release from the GitHub UI, which
+# triggers it.
 on:
   push:
     branches: [main, master]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -17,55 +21,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
-    # Human-gated environment; OIDC subject is bound to it (ADR-0008).
-    environment: npm-publish
     permissions:
-      contents: read
-      id-token: write # OIDC trusted publishing — NO NPM_TOKEN is stored
+      contents: write # create the tag + GitHub Release
     steps:
-      # Audit mode while the endpoint allowlist is being confirmed (ADR-0013).
-      # Flip to `block` together with ci.yml once the audit run is reviewed.
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
           egress-policy: audit
           allowed-endpoints: >
             github.com:443
             api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            raw.githubusercontent.com:443
-            viteplus.dev:443
-            registry.npmjs.org:443
-            nodejs.org:443
-            fulcio.sigstore.dev:443
-            rekor.sigstore.dev:443
-            tuf-repo-cdn.sigstore.dev:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
         with:
-          node-version: "24"
-          cache: true
-      - run: vp install --frozen-lockfile
-      - run: vp run -r build
-      - run: vp check
-      - run: vp run -r test
-      # Trusted publishing (OIDC): no NPM_TOKEN, provenance auto-attested.
-      # Idempotent: only versions not already on npm are published, so re-merges
-      # without a version bump are a no-op (ADR-0023). Requires the one-time npm
-      # trusted-publisher + `npm-publish` environment setup (ADR-0008).
-      - name: Publish changed versions
+          fetch-depth: 0
+      - name: Create release if the version was bumped
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          for dir in packages/db packages/core packages/auth apps/server apps/admin tools/cli; do
-            name=$(node -p "require('./$dir/package.json').name")
-            ver=$(node -p "require('./$dir/package.json').version")
-            if npm view "$name@$ver" version >/dev/null 2>&1; then
-              echo "::notice::$name@$ver already published — skipping"
-            else
-              echo "::group::publish $name@$ver"
-              (cd "$dir" && npm publish --provenance --access public)
-              echo "::endgroup::"
-            fi
-          done
+          version=$(node -p "require('./package.json').version")
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "::notice::release v$version already exists — nothing to do"
+          else
+            gh release create "v$version" \
+              --title "enbi v$version" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
+            echo "::notice::created release v$version"
+          fi
