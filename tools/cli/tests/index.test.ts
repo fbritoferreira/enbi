@@ -158,6 +158,35 @@ test("keys create → list → revoke via runKeys", async () => {
   });
 });
 
+test("first user created becomes admin; later users get the default role", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const config = {
+    db: { dialect: "sqlite" as const, url: ":memory:" },
+    auth: { secret: "first-user-admin-secret-32-characters", baseURL: "http://localhost" },
+    roles: { admin: "*" as const, viewer: "read" as const },
+    collections: [],
+  };
+  await syncSchema(ctx, config);
+  const app = await createServer(config, { db: ctx });
+
+  const signup = (email: string) =>
+    app.request("/api/admin_auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ email, password: "password12345", name: "U" }),
+    });
+
+  expect((await signup("first@x.test")).ok).toBeTruthy();
+  expect((await signup("second@x.test")).ok).toBeTruthy();
+
+  const rows = await ctx.db.all<{ email: string; role: string }>(
+    sql`SELECT email, role FROM user ORDER BY email`,
+  );
+  const byEmail = Object.fromEntries(rows.map((r) => [r.email, r.role]));
+  expect(byEmail["first@x.test"]).toBe("admin");
+  expect(byEmail["second@x.test"]).toBe("viewer");
+});
+
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
   const cwd = process.cwd();

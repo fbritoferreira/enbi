@@ -1,6 +1,7 @@
 // @enbi/auth — better-auth wiring (ADR-0005): sessions, email/password, social,
 // SSO via genericOAuth, and the admin plugin for the user `role` field.
 import type { EnbiAuthConfig, EnbiDb, EnbiDialect } from "@enbi/db";
+import { count } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, genericOAuth } from "better-auth/plugins";
@@ -49,6 +50,33 @@ export type EnbiAuthOptions = {
   plugins: unknown[];
 };
 
+/** Role the very first user receives so a fresh install has a super-admin (ADR-0034). */
+export const BOOTSTRAP_ADMIN_ROLE = "admin";
+
+/**
+ * better-auth `databaseHooks` that promotes the first-ever user to admin. The
+ * user count is read from our own db (the `user` table) rather than the hook's
+ * context, which is more portable across better-auth versions.
+ */
+function firstUserAdminHook(ctx: EnbiDb, authConfig: EnbiAuthConfig) {
+  const userTable = authSchema(authConfig, ctx.dialect).user;
+  return {
+    user: {
+      create: {
+        before: async (user: Record<string, unknown>) => {
+          const rows = (await ctx.db.select({ n: count() }).from(userTable as never)) as Array<{
+            n: number;
+          }>;
+          const existing = rows[0]?.n ?? 0;
+          return existing === 0
+            ? { data: { ...user, role: BOOTSTRAP_ADMIN_ROLE } }
+            : { data: user };
+        },
+      },
+    },
+  };
+}
+
 /**
  * Shared by {@link createAuth} (runtime) and `authSchema` (migration table
  * generation), so both see the same plugins/fields. The DB adapter is added separately.
@@ -80,6 +108,7 @@ export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
       schema: authSchema(authConfig, ctx.dialect),
     }),
     basePath: AUTH_BASE_PATH,
+    databaseHooks: firstUserAdminHook(ctx, authConfig),
     ...buildAuthOptions(authConfig),
   } as never) as unknown as EnbiAuth;
 }

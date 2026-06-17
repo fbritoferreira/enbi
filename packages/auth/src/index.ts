@@ -19,5 +19,5 @@ export {
   type EnbiAuth,
 } from "./auth.ts";
 export { authSchema } from "./schema.ts";
-export { can, type RolesConfig } from "./permissions.ts";
+export { can, type CanOptions, type RolesConfig } from "./permissions.ts";
 export type { AuthProvider, Identity } from "./provider.ts";

@@ -13,6 +13,7 @@ import { listRevisions, restoreRevision, writeRevision } from "@enbi/core";
 import { Hono } from "hono";
 import { deleteRow, getRow, insertRow, listRows, type Row, updateRow } from "./crud.ts";
 import { errorHandler } from "./errors.ts";
+import { mountKeys } from "./keys.ts";
 import { authorize } from "./guard.ts";
 
 export type CreateServerOptions = {
@@ -134,6 +135,7 @@ export async function createServer(
     auth = composeProviders(apiKeyProvider(ctx.db, ctx.apiKeys), betterAuthProvider(instance));
   }
 
+  mountKeys(app, ctx, config.roles, auth);
   for (const col of config.collections) {
     mountCollection(app, ctx, config.roles, auth, col);
   }
