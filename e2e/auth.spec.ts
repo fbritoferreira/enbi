@@ -28,12 +28,12 @@ test("health is up", async ({ request }) => {
 
 test("session: signup → signin → read content", async ({ request }) => {
   const email = unique("user");
-  const signup = await request.post("/api/auth/sign-up/email", {
+  const signup = await request.post("/api/admin_auth/sign-up/email", {
     data: { email, password: "password12345", name: "E2E User" },
   });
   expect(signup.ok()).toBeTruthy();
 
-  const signin = await request.post("/api/auth/sign-in/email", {
+  const signin = await request.post("/api/admin_auth/sign-in/email", {
     data: { email, password: "password12345" },
   });
   expect(signin.ok(), `signin ${signin.status()}: ${await signin.text()}`).toBeTruthy();
@@ -63,10 +63,10 @@ test("denied: anonymous create is 401", async ({ request }) => {
 
 test("denied: wrong password is rejected", async ({ request }) => {
   const email = unique("user");
-  await request.post("/api/auth/sign-up/email", {
+  await request.post("/api/admin_auth/sign-up/email", {
     data: { email, password: "password12345", name: "E2E User" },
   });
-  const bad = await request.post("/api/auth/sign-in/email", {
+  const bad = await request.post("/api/admin_auth/sign-in/email", {
     data: { email, password: "wrong-password" },
   });
   expect(bad.ok()).toBeFalsy();
@@ -74,10 +74,10 @@ test("denied: wrong password is rejected", async ({ request }) => {
 
 test("denied: viewer cannot create (403)", async ({ request }) => {
   const email = unique("viewer");
-  await request.post("/api/auth/sign-up/email", {
+  await request.post("/api/admin_auth/sign-up/email", {
     data: { email, password: "password12345", name: "Viewer" },
   });
-  await request.post("/api/auth/sign-in/email", {
+  await request.post("/api/admin_auth/sign-in/email", {
     data: { email, password: "password12345" },
   });
   const create = await request.post("/api/posts", {

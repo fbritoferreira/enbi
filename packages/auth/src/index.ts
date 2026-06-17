@@ -11,6 +11,7 @@ export {
   verifyApiKey,
 } from "./apikey.ts";
 export {
+  AUTH_BASE_PATH,
   betterAuthProvider,
   buildAuthOptions,
   createAuth,

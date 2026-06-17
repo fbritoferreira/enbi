@@ -43,8 +43,9 @@ enbi keys list
 enbi keys revoke <id>
 ```
 
-Auth (sessions, social, SSO) is better-auth; API keys and a `public` role are built in. Content is
-served as auto-generated REST per collection, with full revision history.
+Auth (sessions, social, SSO) is better-auth, served at `/api/admin_auth/*`; API keys and a `public`
+role are built in. Content is served as auto-generated REST per collection, with full revision
+history. System routes are namespaced under `admin_` (so a collection can't be named `auth`/`keys`).
 
 ## Toolchain
 

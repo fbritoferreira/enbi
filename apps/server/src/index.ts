@@ -3,6 +3,7 @@
 import { type AnyCollection, createDb, type EnbiConfig, type EnbiDb, EnbiError } from "@enbi/db";
 import {
   apiKeyProvider,
+  AUTH_BASE_PATH,
   type AuthProvider,
   betterAuthProvider,
   composeProviders,
@@ -128,7 +129,7 @@ export async function createServer(
   let auth = opts.authProvider;
   if (!auth) {
     const instance = createAuth(ctx, config.auth);
-    app.on(["GET", "POST"], "/api/auth/*", (c) => instance.handler(c.req.raw));
+    app.on(["GET", "POST"], `${AUTH_BASE_PATH}/*`, (c) => instance.handler(c.req.raw));
     // API key (x-api-key / Bearer) is tried first, then a better-auth session.
     auth = composeProviders(apiKeyProvider(ctx.db, ctx.apiKeys), betterAuthProvider(instance));
   }

@@ -16,6 +16,13 @@ const DRIZZLE_PROVIDER: Record<EnbiDialect, "sqlite" | "pg" | "mysql"> = {
 export const DEFAULT_ROLE = "viewer";
 
 /**
+ * System routes are namespaced under `admin_` so they can never collide with a
+ * user content collection at `/api/:collection` (ADR-0033). better-auth is
+ * mounted (and configured) at this base path.
+ */
+export const AUTH_BASE_PATH = "/api/admin_auth";
+
+/**
  * The slice of the better-auth instance the framework uses. Declared explicitly
  * so the generated `.d.ts` stays portable (the full inferred better-auth type
  * leaks non-nameable zod internals — TS2883).
@@ -72,6 +79,7 @@ export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
       // resolves models (user/session/account/...) (ADR-0031).
       schema: authSchema(authConfig, ctx.dialect),
     }),
+    basePath: AUTH_BASE_PATH,
     ...buildAuthOptions(authConfig),
   } as never) as unknown as EnbiAuth;
 }

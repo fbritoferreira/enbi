@@ -36,6 +36,10 @@ test("collection() resolves the primary key and defaults", () => {
   expect(c.permissionsKey).toBe("posts");
 });
 
+test("collection() rejects the reserved admin_ namespace", () => {
+  expect(() => collection(posts, { name: "admin_secrets" })).toThrow(/must not start with/);
+});
+
 test("defineEnbiConfig returns the config unchanged", () => {
   const config = defineEnbiConfig({
     db: { dialect: "sqlite", url: ":memory:" },

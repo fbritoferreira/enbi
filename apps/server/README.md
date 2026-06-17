@@ -3,7 +3,8 @@
 The Hono content API for [enbi](https://enbi-cms.com). `createServer(config)` mounts:
 
 - `GET /health`
-- `POST /api/auth/*` — better-auth (sessions, social, SSO).
+- `POST /api/admin_auth/*` — better-auth (sessions, social, SSO). System routes are namespaced
+  under `admin_` so they never collide with a content collection (ADR-0033).
 - Auto-generated REST per collection: `GET/POST /api/:collection`, `GET/PUT/DELETE /api/:collection/:id`,
   `GET /api/:collection/:id/revisions`, `POST /api/:collection/:id/restore`.
 
