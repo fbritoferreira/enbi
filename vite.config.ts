@@ -4,7 +4,10 @@ export default defineConfig({
   staged: {
     "*": "vp check --fix",
   },
-  fmt: {},
+  fmt: {
+    // The CLA bot writes this file (it doesn't run oxfmt); don't format-gate it.
+    ignorePatterns: [".github/cla/**"],
+  },
   lint: {
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: { "vite-plus/prefer-vite-plus-imports": "error" },
