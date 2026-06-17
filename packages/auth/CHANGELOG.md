@@ -1,5 +1,16 @@
 # @enbi/auth
 
+## 0.3.0
+
+### Minor Changes
+
+- [#9](https://github.com/fbritoferreira/enbi/pull/9) [`bb0d24c`](https://github.com/fbritoferreira/enbi/commit/bb0d24c3bf19020f03a0d386c43134b6f21388cc) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add migrations: `enbi generate` writes versioned migration files (drizzle-kit diff) and `enbi migrate` applies pending ones, tracked in `_enbi_migrations`. better-auth's tables are translated into the drizzle schema (`@enbi/auth` `authSchema` via `getSchema`) and unified with content + `_revisions` + `_api_keys`, so one pipeline migrates everything and `enbi dev` auto-sync now includes session-auth tables too.
+
+### Patch Changes
+
+- Updated dependencies [[`bb0d24c`](https://github.com/fbritoferreira/enbi/commit/bb0d24c3bf19020f03a0d386c43134b6f21388cc)]:
+  - @enbi/db@0.3.0
+
 ## 0.2.0
 
 ### Patch Changes
