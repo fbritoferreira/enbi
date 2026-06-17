@@ -24,6 +24,12 @@ catalog:
 # Supply-chain hardening: no dependency may run lifecycle (postinstall) scripts
 # unless explicitly allowlisted here. (ADR-0008)
 onlyBuiltDependencies: []
+# Explicitly acknowledge these deps' build scripts as intentionally NOT run, so
+# `pnpm install --frozen-lockfile` doesn't error (ERR_PNPM_IGNORED_BUILDS) in CI.
+# enbi never needs their native binaries (Vite+ uses rolldown/oxc).
+ignoredBuiltDependencies:
+  - esbuild
+  - sharp
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
@@ -34,9 +40,6 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
-allowBuilds:
-  esbuild: set this to true or false
-  sharp: set this to true or false
 minimumReleaseAgeExclude:
   - "@better-auth/core@1.7.0-beta.6"
   - "@better-auth/drizzle-adapter@1.7.0-beta.6"
