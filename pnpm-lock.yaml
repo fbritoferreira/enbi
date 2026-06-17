@@ -418,6 +418,9 @@ importers:
 
   tools/cli:
     dependencies:
+      '@enbi/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@enbi/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -433,6 +436,9 @@ importers:
       drizzle-kit:
         specifier: 'catalog:'
         version: 0.31.10
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@libsql/client@0.17.4)(@types/pg@8.20.0)(kysely@0.29.2)(mysql2@3.22.5(@types/node@25.9.3))(pg@8.21.0)
       jiti:
         specifier: 'catalog:'
         version: 2.7.0
@@ -449,9 +455,6 @@ importers:
       bumpp:
         specifier: ^11.1.0
         version: 11.1.0
-      drizzle-orm:
-        specifier: 'catalog:'
-        version: 0.45.2(@libsql/client@0.17.4)(@types/pg@8.20.0)(kysely@0.29.2)(mysql2@3.22.5(@types/node@25.9.3))(pg@8.21.0)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

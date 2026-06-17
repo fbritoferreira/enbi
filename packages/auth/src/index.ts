@@ -6,6 +6,13 @@ export {
   hashApiKey,
   verifyApiKey,
 } from "./apikey.ts";
-export { betterAuthProvider, createAuth, DEFAULT_ROLE, type EnbiAuth } from "./auth.ts";
+export {
+  betterAuthProvider,
+  buildAuthOptions,
+  createAuth,
+  DEFAULT_ROLE,
+  type EnbiAuth,
+} from "./auth.ts";
+export { authSchema } from "./schema.ts";
 export { can, type RolesConfig } from "./permissions.ts";
 export type { AuthProvider, Identity } from "./provider.ts";

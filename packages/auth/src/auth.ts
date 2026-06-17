@@ -28,7 +28,24 @@ export type EnbiAuth = {
   };
 };
 
-export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
+/**
+ * The better-auth options enbi derives from its auth config. `plugins` is
+ * `unknown[]` so the exported type stays portable (the real plugin types leak
+ * non-nameable zod internals — TS2883); the value is cast at the call sites.
+ */
+export type EnbiAuthOptions = {
+  secret: string;
+  baseURL?: string;
+  emailAndPassword: { enabled: boolean };
+  socialProviders: Record<string, { clientId: string; clientSecret: string }>;
+  plugins: unknown[];
+};
+
+/**
+ * Shared by {@link createAuth} (runtime) and `authSchema` (migration table
+ * generation), so both see the same plugins/fields. The DB adapter is added separately.
+ */
+export function buildAuthOptions(authConfig: EnbiAuthConfig): EnbiAuthOptions {
   const social: Record<string, { clientId: string; clientSecret: string }> = {};
   if (authConfig.social?.github) social.github = authConfig.social.github;
   if (authConfig.social?.google) social.google = authConfig.social.google;
@@ -37,14 +54,20 @@ export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
     ? [genericOAuth({ config: authConfig.ssoProviders })]
     : [];
 
-  return betterAuth({
-    database: drizzleAdapter(ctx.db, { provider: DRIZZLE_PROVIDER[ctx.dialect] }),
+  return {
     secret: authConfig.secret,
     baseURL: authConfig.baseURL,
     emailAndPassword: { enabled: authConfig.emailPassword ?? true },
     socialProviders: social,
     plugins: [admin({ defaultRole: authConfig.defaultRole ?? DEFAULT_ROLE }), ...sso],
-  }) as unknown as EnbiAuth;
+  };
+}
+
+export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
+  return betterAuth({
+    database: drizzleAdapter(ctx.db, { provider: DRIZZLE_PROVIDER[ctx.dialect] }),
+    ...buildAuthOptions(authConfig),
+  } as never) as unknown as EnbiAuth;
 }
 
 /** Adapt a better-auth instance to the framework's {@link AuthProvider}. */

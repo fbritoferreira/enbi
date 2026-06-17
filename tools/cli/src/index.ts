@@ -3,6 +3,7 @@ import { cac } from "cac";
 import pkg from "../package.json" with { type: "json" };
 import { runBuild } from "./commands/build.ts";
 import { runDev } from "./commands/dev.ts";
+import { runGenerate } from "./commands/generate.ts";
 import { runMigrate } from "./commands/migrate.ts";
 import { runStart } from "./commands/start.ts";
 
@@ -33,9 +34,22 @@ export async function run(argv: string[]): Promise<void> {
       runStart({ config: flags.config, port: flags.port ? Number(flags.port) : undefined }),
     );
 
-  cli.command("migrate", "Run database migrations").action(() => {
-    runMigrate();
-  });
+  cli
+    .command("generate", "Generate a migration from the current schema")
+    .option("--config <path>", "Path to enbi.config.ts")
+    .option("--dir <path>", "Migrations directory")
+    .option("--name <name>", "Migration name")
+    .action((flags: CommonFlags & { dir?: string; name?: string }) =>
+      runGenerate({ config: flags.config, dir: flags.dir, name: flags.name }),
+    );
+
+  cli
+    .command("migrate", "Apply pending migrations")
+    .option("--config <path>", "Path to enbi.config.ts")
+    .option("--dir <path>", "Migrations directory")
+    .action((flags: CommonFlags & { dir?: string }) =>
+      runMigrate({ config: flags.config, dir: flags.dir }),
+    );
 
   cli.help();
   cli.version(getVersion());
