@@ -20,6 +20,7 @@
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "drizzle-orm": "catalog:",
+    "testcontainers": "catalog:",
     "vite-plus": "catalog:"
   },
   "devEngines": {
