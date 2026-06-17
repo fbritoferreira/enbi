@@ -1,0 +1,41 @@
+{
+  "name": "@enbi/server",
+  "version": "0.0.0",
+  "description": "Hono content API for enbi.",
+  "homepage": "https://enbi-cms.com",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./main": "./dist/main.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "start": "node dist/main.mjs",
+    "test": "vp test",
+    "check": "vp check",
+    "prepublishOnly": "vp run build"
+  },
+  "dependencies": {
+    "@enbi/auth": "workspace:*",
+    "@enbi/core": "workspace:*",
+    "@enbi/db": "workspace:*",
+    "@hono/node-server": "catalog:",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@typescript/native-preview": "7.0.0-dev.20260509.2",
+    "bumpp": "^11.1.0",
+    "typescript": "^6.0.3",
+    "vite-plus": "catalog:"
+  }
+}

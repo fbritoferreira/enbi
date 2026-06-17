@@ -1,0 +1,29 @@
+{
+  "name": "@enbi/admin",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Astro admin UI for enbi (talks to @enbi/server over HTTP).",
+  "homepage": "https://enbi-cms.com",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "vp test",
+    "check": "vp check",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^6.4.7"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

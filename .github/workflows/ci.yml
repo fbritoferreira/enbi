@@ -1,0 +1,55 @@
+name: ci
+
+# Runs on every pull request (any base branch — not just main) and on pushes to
+# main. workflow_dispatch allows manual runs. (ADR-0012)
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Pinned to commit SHAs (ADR-0008). Bump via Renovate/Dependabot.
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp install --frozen-lockfile
+      - run: vp check
+      - run: vp run -r test
+      - run: vp run -r build
+      # PR build artifacts: reviewers can download the built packages + admin site.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: enbi-build-${{ github.event.pull_request.number || github.run_id }}
+          path: |
+            packages/*/dist
+            apps/server/dist
+            apps/admin/dist
+            tools/cli/dist
+          if-no-files-found: ignore
+          retention-days: 7

@@ -11,6 +11,12 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vitest: 4.1.9
   vite-plus: latest
+  hono: ^4
+  "@hono/node-server": ^1
+
+# Supply-chain hardening: no dependency may run lifecycle (postinstall) scripts
+# unless explicitly allowlisted here. (ADR-0008)
+onlyBuiltDependencies: []
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
@@ -21,3 +27,5 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
+allowBuilds:
+  sharp: set this to true or false

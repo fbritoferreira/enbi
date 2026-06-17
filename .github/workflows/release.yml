@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Human-gated environment; OIDC subject is bound to it (ADR-0008).
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing — NO NPM_TOKEN is stored
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp install --frozen-lockfile
+      - run: vp check
+      - run: vp run -r test
+      - run: vp run -r build
+      # Trusted publishing (OIDC): no NPM_TOKEN. Dry-run until the npm trusted
+      # publisher is configured per package (see ADR-0008 operational setup).
+      # Flip --dry-run off in the first real release sub-project.
+      - name: Publish (dry-run)
+        run: |
+          for dir in packages/db packages/core packages/auth apps/server apps/admin tools/cli; do
+            echo "::group::publish $dir (dry-run)"
+            (cd "$dir" && npm publish --provenance --access public --dry-run)
+            echo "::endgroup::"
+          done
