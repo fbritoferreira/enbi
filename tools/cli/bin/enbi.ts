@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-import { getVersion } from "../src/index.ts";
+import { EnbiError } from "@enbi/db";
+import { run } from "../src/index.ts";
 
-const arg = process.argv[2];
-if (arg === "--version" || arg === "-v") {
-  console.warn(getVersion());
-} else {
-  console.warn("enbi — commands (dev/build/start) coming soon. Try --version.");
-}
+run(process.argv).catch((error: unknown) => {
+  if (error instanceof EnbiError) {
+    console.error(`enbi: ${error.message}`);
+  } else {
+    console.error(error);
+  }
+  process.exitCode = 1;
+});

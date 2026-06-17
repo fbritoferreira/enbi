@@ -220,9 +220,15 @@ catalogs:
     '@types/pg':
       specifier: ^8.20.0
       version: 8.20.0
+    astro:
+      specifier: ^6.4.7
+      version: 6.4.7
     better-auth:
       specifier: 1.7.0-beta.6
       version: 1.7.0-beta.6
+    cac:
+      specifier: ^7.0.0
+      version: 7.0.0
     drizzle-kit:
       specifier: ^0.31.10
       version: 0.31.10
@@ -232,6 +238,9 @@ catalogs:
     hono:
       specifier: ^4
       version: 4.12.25
+    jiti:
+      specifier: ^2.7.0
+      version: 2.7.0
     mysql2:
       specifier: ^3.22.5
       version: 3.22.5
@@ -409,10 +418,28 @@ importers:
 
   tools/cli:
     dependencies:
+      '@enbi/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@enbi/server':
         specifier: workspace:*
         version: link:../../apps/server
+      '@hono/node-server':
+        specifier: 'catalog:'
+        version: 1.19.14(hono@4.12.25)
+      cac:
+        specifier: 'catalog:'
+        version: 7.0.0
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.10
+      jiti:
+        specifier: 'catalog:'
+        version: 2.7.0
     devDependencies:
+      '@libsql/client':
+        specifier: 'catalog:'
+        version: 0.17.4
       '@types/node':
         specifier: ^25.6.2
         version: 25.9.3
@@ -422,12 +449,19 @@ importers:
       bumpp:
         specifier: ^11.1.0
         version: 11.1.0
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@libsql/client@0.17.4)(@types/pg@8.20.0)(kysely@0.29.2)(mysql2@3.22.5(@types/node@25.9.3))(pg@8.21.0)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
       vite-plus:
         specifier: 'catalog:'
         version: 0.1.24(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(typescript@6.0.3)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))(yaml@2.9.0)
+    optionalDependencies:
+      astro:
+        specifier: 'catalog:'
+        version: 6.4.7(@types/node@25.9.3)(jiti@2.7.0)(tsx@4.22.4)(typescript@6.0.3)(yaml@2.9.0)
 
 packages:
 
