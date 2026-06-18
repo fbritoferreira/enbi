@@ -41,6 +41,7 @@
     "jiti": "catalog:"
   },
   "devDependencies": {
+    "@enbi/admin": "workspace:*",
     "@libsql/client": "catalog:",
     "@testcontainers/mysql": "catalog:",
     "@testcontainers/postgresql": "catalog:",
@@ -55,7 +56,6 @@
     "vite-plus": "catalog:"
   },
   "optionalDependencies": {
-    "@enbi/admin": "workspace:*",
     "astro": "catalog:"
   }
 }
