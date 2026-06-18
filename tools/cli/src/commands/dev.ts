@@ -48,6 +48,7 @@ export async function runDev(opts: DevOptions = {}, deps: DevDeps = {}): Promise
 
   const close = async (): Promise<void> => {
     await admin?.stop();
+    (server as { closeAllConnections?: () => void }).closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });

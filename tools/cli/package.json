@@ -55,6 +55,7 @@
     "vite-plus": "catalog:"
   },
   "optionalDependencies": {
+    "@enbi/admin": "workspace:*",
     "astro": "catalog:"
   }
 }

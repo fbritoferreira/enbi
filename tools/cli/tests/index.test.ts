@@ -198,6 +198,25 @@ test("enbi build runs the admin build path (or surfaces a typed error)", async (
   expect(outcome === "built" || outcome instanceof EnbiError).toBe(true);
 }, 120_000);
 
+test("dev serves the content API and the admin together", async () => {
+  const { dir } = tmpConfig(
+    `export default { db: { dialect: "sqlite", url: ":memory:" }, auth: { secret: "x" }, roles: { admin: "*" }, collections: [] };`,
+  );
+  const { runDev } = await import("../src/commands/dev.ts");
+  const handle = await runDev({ cwd: dir, port: 0, adminPort: 0 });
+  try {
+    const health = await fetch(`${handle.url}/health`);
+    expect(health.status).toBe(200);
+
+    expect(handle.admin?.url, "admin dev server should be running").toBeTruthy();
+    const admin = await fetch(handle.admin?.url as string);
+    expect(admin.status).toBe(200);
+    expect((await admin.text()).toLowerCase()).toContain("<!doctype html");
+  } finally {
+    await handle.close();
+  }
+}, 120_000);
+
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
   const cwd = process.cwd();
