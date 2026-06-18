@@ -217,6 +217,24 @@ test("dev serves the content API and the admin together", async () => {
   }
 }, 120_000);
 
+test("dev still serves the API when the admin fails to start", async () => {
+  const { dir } = tmpConfig(
+    `export default { db: { dialect: "sqlite", url: ":memory:" }, auth: { secret: "x" }, roles: { admin: "*" }, collections: [] };`,
+  );
+  const { runDev } = await import("../src/commands/dev.ts");
+  const handle = await runDev(
+    { cwd: dir, port: 0 },
+    { startAdmin: () => Promise.reject(new Error("boom")) },
+  );
+  try {
+    const health = await fetch(`${handle.url}/health`);
+    expect(health.status).toBe(200);
+    expect(handle.admin).toBeNull();
+  } finally {
+    await handle.close();
+  }
+});
+
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
   const cwd = process.cwd();
