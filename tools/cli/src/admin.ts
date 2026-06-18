@@ -3,8 +3,12 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { EnbiError } from "@enbi/db";
 
+/** A running Astro dev server: its URL (when known) and a stop function. */
+export type AdminHandle = { url?: string; stop: () => Promise<void> };
+
+type AstroDevServer = { address?: { port?: number }; stop: () => Promise<void> };
 type AstroApi = {
-  dev: (opts: { root: string; server?: { port?: number } }) => Promise<unknown>;
+  dev: (opts: { root: string; server?: { port?: number } }) => Promise<AstroDevServer>;
   build: (opts: { root: string }) => Promise<unknown>;
 };
 
@@ -25,9 +29,17 @@ async function loadAstro(): Promise<AstroApi> {
   }
 }
 
-export async function startAdminDev(port?: number): Promise<void> {
+export async function startAdminDev(port?: number): Promise<AdminHandle> {
   const astro = await loadAstro();
-  await astro.dev({ root: adminRoot(), server: port ? { port } : undefined });
+  const dev = await astro.dev({
+    root: adminRoot(),
+    server: port !== undefined ? { port } : undefined,
+  });
+  const boundPort = dev.address?.port;
+  return {
+    url: boundPort ? `http://localhost:${boundPort}` : undefined,
+    stop: () => dev.stop(),
+  };
 }
 
 export async function buildAdmin(): Promise<void> {
