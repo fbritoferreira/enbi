@@ -27,7 +27,7 @@ jobs:
       # full allowlist. Known-required endpoints are listed for that switch. (ADR-0013)
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
-          egress-policy: audit
+          egress-policy: block
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -37,6 +37,10 @@ jobs:
             viteplus.dev:443
             registry.npmjs.org:443
             nodejs.org:443
+            auth.docker.io:443
+            registry-1.docker.io:443
+            index.docker.io:443
+            production.cloudfront.docker.com:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
         with:
@@ -70,7 +74,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
-          egress-policy: audit
+          egress-policy: block
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -84,6 +88,10 @@ jobs:
             pkg-containers.githubusercontent.com:443
             playwright.azureedge.net:443
             cdn.playwright.dev:443
+            auth.docker.io:443
+            registry-1.docker.io:443
+            index.docker.io:443
+            production.cloudfront.docker.com:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
         with:
@@ -92,7 +100,9 @@ jobs:
       - run: corepack enable
       - run: vp install --frozen-lockfile
       - run: vp run -r build
-      - run: pnpm exec playwright install --with-deps chromium
+      # No --with-deps: it runs apt-get (Ubuntu mirrors) which egress block would
+      # reject; GitHub's ubuntu-latest preinstalls the browser system libraries.
+      - run: pnpm exec playwright install chromium
       - run: pnpm exec playwright test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}
