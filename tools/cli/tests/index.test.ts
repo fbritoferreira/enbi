@@ -1,7 +1,8 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collection, createDb, type EnbiConfig, type EnbiDb, EnbiError } from "@enbi/db";
+import { collection, createDb, type EnbiConfig, type EnbiDb } from "@enbi/db";
 import { createServer } from "@enbi/server";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -187,16 +188,51 @@ test("first user created becomes admin; later users get the default role", async
   expect(byEmail["second@x.test"]).toBe("viewer");
 });
 
-test("enbi build runs the admin build path (or surfaces a typed error)", async () => {
+test("enbi build emits the admin artifact", async () => {
   const { runBuild } = await import("../src/commands/build.ts");
-  // Either it builds the admin, or throws a typed EnbiError if astro/@enbi/admin
-  // can't be resolved from here. Anything else is a real failure.
-  const outcome = await runBuild().then(
-    () => "built" as const,
-    (error: unknown) => error,
-  );
-  expect(outcome === "built" || outcome instanceof EnbiError).toBe(true);
+  await runBuild();
+  // tools/cli/tests → repo root is three levels up.
+  const out = fileURLToPath(new URL("../../../apps/admin/dist/index.html", import.meta.url));
+  const html = readFileSync(out, "utf8");
+  expect(html.trim().length).toBeGreaterThan(0);
 }, 120_000);
+
+test("dev serves the content API and the admin together", async () => {
+  const { dir } = tmpConfig(
+    `export default { db: { dialect: "sqlite", url: ":memory:" }, auth: { secret: "x" }, roles: { admin: "*" }, collections: [] };`,
+  );
+  const { runDev } = await import("../src/commands/dev.ts");
+  const handle = await runDev({ cwd: dir, port: 0, adminPort: 0 });
+  try {
+    const health = await fetch(`${handle.url}/health`);
+    expect(health.status).toBe(200);
+
+    expect(handle.admin?.url, "admin dev server should be running").toBeTruthy();
+    const admin = await fetch(handle.admin?.url as string);
+    expect(admin.status).toBe(200);
+    expect((await admin.text()).toLowerCase()).toContain("<!doctype html");
+  } finally {
+    await handle.close();
+  }
+}, 120_000);
+
+test("dev still serves the API when the admin fails to start", async () => {
+  const { dir } = tmpConfig(
+    `export default { db: { dialect: "sqlite", url: ":memory:" }, auth: { secret: "x" }, roles: { admin: "*" }, collections: [] };`,
+  );
+  const { runDev } = await import("../src/commands/dev.ts");
+  const handle = await runDev(
+    { cwd: dir, port: 0 },
+    { startAdmin: () => Promise.reject(new Error("boom")) },
+  );
+  try {
+    const health = await fetch(`${handle.url}/health`);
+    expect(health.status).toBe(200);
+    expect(handle.admin).toBeNull();
+  } finally {
+    await handle.close();
+  }
+});
 
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
