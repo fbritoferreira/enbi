@@ -1,0 +1,29 @@
+---
+const { title = "enbi admin" } = Astro.props;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; }
+      header { display: flex; gap: 1rem; padding: .75rem 1rem; background: #111; color: #fff; }
+      header a { color: #fff; text-decoration: none; }
+      main { padding: 1rem; max-width: 60rem; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: .4rem .6rem; text-align: left; }
+      label { display: block; margin: .5rem 0 .2rem; font-weight: 600; }
+      input, textarea { width: 100%; max-width: 30rem; padding: .4rem; }
+      button { margin-top: .75rem; padding: .4rem .8rem; }
+      .error { color: #b00; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/">Collections</a>
+      <a href="/keys">API keys</a>
+    </header>
+    <main><slot /></main>
+  </body>
+</html>
