@@ -1,0 +1,49 @@
+---
+import Admin from "../layouts/Admin.astro";
+---
+<Admin title="API keys — enbi">
+  <h1>API keys</h1>
+  <form id="create">
+    <label for="role">Role</label>
+    <input id="role" value="admin" />
+    <label for="label">Label</label>
+    <input id="label" />
+    <button type="submit">Create key</button>
+  </form>
+  <p id="new"></p>
+  <table><thead><tr><th>id</th><th>role</th><th>label</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  <script>
+    import { enbiFetch, escapeHtml } from "../lib/api.ts";
+    const rowsEl = document.getElementById("rows");
+    async function load() {
+      const res = await enbiFetch("/api/admin_keys");
+      if (res.status === 401) { location.href = "/login"; return; }
+      const keys = (await res.json()) as { id: string; role: string; label: string | null }[];
+      if (rowsEl) {
+        rowsEl.innerHTML = keys
+          .map((k) => `<tr><td>${escapeHtml(k.id)}</td><td>${escapeHtml(k.role)}</td><td>${escapeHtml(k.label ?? "")}</td><td><button data-id="${escapeHtml(k.id)}">revoke</button></td></tr>`)
+          .join("");
+        rowsEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
+          b.addEventListener("click", async () => {
+            await enbiFetch(`/api/admin_keys/${encodeURIComponent(b.dataset.id ?? "")}`, { method: "DELETE" });
+            void load();
+          }),
+        );
+      }
+    }
+    const createForm = document.getElementById("create");
+    createForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const role = (document.getElementById("role") as HTMLInputElement).value;
+      const label = (document.getElementById("label") as HTMLInputElement).value;
+      const res = await enbiFetch("/api/admin_keys", { method: "POST", body: JSON.stringify({ role, label }) });
+      if (res.ok) {
+        const { key } = (await res.json()) as { key: string };
+        const newEl = document.getElementById("new");
+        if (newEl) newEl.textContent = `New key (copy now): ${key}`;
+        void load();
+      }
+    });
+    void load();
+  </script>
+</Admin>
