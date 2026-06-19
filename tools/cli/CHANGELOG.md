@@ -1,5 +1,16 @@
 # @enbi/cli
 
+## 0.5.2
+
+### Patch Changes
+
+- [#18](https://github.com/fbritoferreira/enbi/pull/18) [`0632d04`](https://github.com/fbritoferreira/enbi/commit/0632d0426364abd544f2fe0cf481ddd8be984742) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - `enbi dev` and `startAdminDev` now return closable handles (`DevHandle` / `AdminHandle`), so the dev server and admin can be stopped programmatically. No change to the `dev`/`build` CLI behavior.
+
+- Updated dependencies []:
+  - @enbi/server@0.5.2
+  - @enbi/auth@0.5.2
+  - @enbi/db@0.5.2
+
 ## 0.5.1
 
 ### Patch Changes
