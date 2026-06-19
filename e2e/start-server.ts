@@ -25,6 +25,10 @@ function run(args: string[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const ADMIN_PORT = 4321;
+  process.env.ENBI_E2E_ADMIN_ORIGIN = `http://localhost:${ADMIN_PORT}`;
+  process.env.PUBLIC_ENBI_API = `http://localhost:${process.env.PORT ?? "3787"}`;
+
   rmSync("e2e/.tmp", { recursive: true, force: true });
   rmSync("e2e/drizzle", { recursive: true, force: true });
   mkdirSync("e2e/.tmp", { recursive: true });
@@ -51,10 +55,13 @@ async function main(): Promise<void> {
   }
   writeFileSync("e2e/.tmp/sso-ready.json", JSON.stringify({ ready }));
 
+  const { startAdminDev } = await import("../tools/cli/src/admin.ts");
+  const adminHandle = await startAdminDev(ADMIN_PORT);
+
   let server: ChildProcess | undefined;
   const shutdown = (): void => {
     server?.kill("SIGTERM");
-    void stop().finally(() => process.exit(0));
+    void Promise.all([stop(), adminHandle.stop()]).finally(() => process.exit(0));
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
@@ -70,7 +77,7 @@ async function main(): Promise<void> {
     env: process.env,
   });
   server.on("exit", (code) => {
-    void stop().finally(() => process.exit(code ?? 0));
+    void Promise.all([stop(), adminHandle.stop()]).finally(() => process.exit(code ?? 0));
   });
 }
 

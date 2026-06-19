@@ -17,8 +17,13 @@ export default defineConfig({
   // Send Origin so better-auth's CSRF check passes (it matches the configured baseURL).
   use: { baseURL: BASE, extraHTTPHeaders: { origin: BASE } },
   projects: [
-    { name: "api", testIgnore: /sso\.spec\.ts/ },
+    { name: "api", testIgnore: /sso\.spec\.ts|admin\.spec\.ts/ },
     { name: "sso", testMatch: /sso\.spec\.ts/, use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "admin",
+      testMatch: /admin\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], baseURL: "http://localhost:4321" },
+    },
   ],
   webServer: {
     // The launcher boots the mock OIDC container (when Docker exists), then runs

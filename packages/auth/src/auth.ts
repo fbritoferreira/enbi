@@ -48,6 +48,8 @@ export type EnbiAuthOptions = {
   emailAndPassword: { enabled: boolean };
   socialProviders: Record<string, { clientId: string; clientSecret: string }>;
   plugins: unknown[];
+  /** Extra origins better-auth trusts for CSRF / redirect checks. */
+  trustedOrigins?: string[];
 };
 
 /** Role the very first user receives so a fresh install has a super-admin (ADR-0034). */
@@ -81,7 +83,10 @@ function firstUserAdminHook(ctx: EnbiDb, authConfig: EnbiAuthConfig) {
  * Shared by {@link createAuth} (runtime) and `authSchema` (migration table
  * generation), so both see the same plugins/fields. The DB adapter is added separately.
  */
-export function buildAuthOptions(authConfig: EnbiAuthConfig): EnbiAuthOptions {
+export function buildAuthOptions(
+  authConfig: EnbiAuthConfig,
+  trustedOrigins?: string[],
+): EnbiAuthOptions {
   const social: Record<string, { clientId: string; clientSecret: string }> = {};
   if (authConfig.social?.github) social.github = authConfig.social.github;
   if (authConfig.social?.google) social.google = authConfig.social.google;
@@ -96,10 +101,15 @@ export function buildAuthOptions(authConfig: EnbiAuthConfig): EnbiAuthOptions {
     emailAndPassword: { enabled: authConfig.emailPassword ?? true },
     socialProviders: social,
     plugins: [admin({ defaultRole: authConfig.defaultRole ?? DEFAULT_ROLE }), ...sso],
+    ...(trustedOrigins?.length ? { trustedOrigins } : {}),
   };
 }
 
-export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
+export function createAuth(
+  ctx: EnbiDb,
+  authConfig: EnbiAuthConfig,
+  trustedOrigins?: string[],
+): EnbiAuth {
   return betterAuth({
     database: drizzleAdapter(ctx.db, {
       provider: DRIZZLE_PROVIDER[ctx.dialect],
@@ -109,7 +119,7 @@ export function createAuth(ctx: EnbiDb, authConfig: EnbiAuthConfig): EnbiAuth {
     }),
     basePath: AUTH_BASE_PATH,
     databaseHooks: firstUserAdminHook(ctx, authConfig),
-    ...buildAuthOptions(authConfig),
+    ...buildAuthOptions(authConfig, trustedOrigins),
   } as never) as unknown as EnbiAuth;
 }
 
