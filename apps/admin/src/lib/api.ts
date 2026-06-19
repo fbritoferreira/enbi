@@ -5,6 +5,15 @@ export function apiBase(): string {
   return (import.meta.env.PUBLIC_ENBI_API as string | undefined) ?? "http://localhost:3000";
 }
 
+export function escapeHtml(value: string | number | boolean | null | undefined): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export async function enbiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");

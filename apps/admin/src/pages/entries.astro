@@ -7,7 +7,7 @@ import Admin from "../layouts/Admin.astro";
   <p id="page"></p>
   <table><thead><tr><th>id</th><th></th></tr></thead><tbody id="rows"></tbody></table>
   <script>
-    import { enbiFetch } from "../lib/api.ts";
+    import { enbiFetch, escapeHtml } from "../lib/api.ts";
     const name = new URLSearchParams(location.search).get("c") ?? "";
     document.getElementById("title")!.textContent = name;
     (document.getElementById("new") as HTMLAnchorElement).href = `/edit?c=${encodeURIComponent(name)}&id=new`;
@@ -22,7 +22,7 @@ import Admin from "../layouts/Admin.astro";
       const rows = (await res.json()) as Record<string, unknown>[];
       document.getElementById("page")!.textContent = `${rows.length ? offset + 1 : 0}–${offset + rows.length} of ${total}`;
       document.getElementById("rows")!.innerHTML = rows
-        .map((r) => `<tr><td>${String(r.id)}</td><td><a href="/edit?c=${encodeURIComponent(name)}&id=${encodeURIComponent(String(r.id))}">edit</a></td></tr>`)
+        .map((r) => `<tr><td>${escapeHtml(r.id)}</td><td><a href="/edit?c=${encodeURIComponent(name)}&id=${encodeURIComponent(String(r.id))}">edit</a></td></tr>`)
         .join("");
     }
     document.getElementById("q")!.addEventListener("input", () => { offset = 0; void load(); });
