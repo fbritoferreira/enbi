@@ -1,6 +1,7 @@
 // @enbi/cli — command surface (ADR-0009 fulfilled): dev / build / start / migrate.
 import { cac } from "cac";
 import pkg from "../package.json" with { type: "json" };
+import { runAuthSetup } from "./commands/auth.ts";
 import { runBuild } from "./commands/build.ts";
 import { runDev } from "./commands/dev.ts";
 import { runGenerate } from "./commands/generate.ts";
@@ -63,6 +64,13 @@ export async function run(argv: string[]): Promise<void> {
         id: string | undefined,
         flags: CommonFlags & { role?: string; label?: string },
       ) => runKeys(action, id, { config: flags.config, role: flags.role, label: flags.label }),
+    );
+
+  cli
+    .command("auth setup <provider>", "Scaffold an auth provider (github|google|oidc)")
+    .option("--force", "Overwrite .env.example")
+    .action((provider: string, flags: { force?: boolean }) =>
+      runAuthSetup(provider, { force: flags.force }),
     );
 
   cli.help();

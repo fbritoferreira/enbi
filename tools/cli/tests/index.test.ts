@@ -234,6 +234,26 @@ test("dev still serves the API when the admin fails to start", async () => {
   }
 });
 
+test("auth setup returns provider snippet + env keys and writes .env.example", async () => {
+  const { runAuthSetup } = await import("../src/commands/auth.ts");
+  const dir = mkdtempSync(join(tmpdir(), "enbi-auth-"));
+
+  const gh = await runAuthSetup("github", { cwd: dir });
+  expect(gh.envKeys).toEqual(["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"]);
+  expect(gh.snippet).toContain("social");
+  expect(gh.snippet).toContain("process.env.GITHUB_CLIENT_ID");
+  const env = readFileSync(join(dir, ".env.example"), "utf8");
+  expect(env).toContain("GITHUB_CLIENT_ID=");
+
+  const oidc = await runAuthSetup("oidc", { cwd: dir });
+  expect(oidc.snippet).toContain("ssoProviders");
+  expect(oidc.envKeys).toContain("OIDC_DISCOVERY_URL");
+  // appended, existing keys preserved
+  expect(readFileSync(join(dir, ".env.example"), "utf8")).toContain("GITHUB_CLIENT_ID=");
+
+  await expect(runAuthSetup("nope", { cwd: dir })).rejects.toMatchObject({ code: "validation" });
+});
+
 test("run routes `migrate` and surfaces a missing-config error", async () => {
   const empty = mkdtempSync(join(tmpdir(), "enbi-noconfig-"));
   const cwd = process.cwd();
