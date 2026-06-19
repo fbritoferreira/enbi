@@ -22,6 +22,7 @@ import {
   updateRow,
 } from "./crud.ts";
 import { errorHandler } from "./errors.ts";
+import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
 import { authorize } from "./guard.ts";
 
@@ -174,6 +175,7 @@ export async function createServer(
   }
 
   mountKeys(app, ctx, config.roles, auth);
+  mountCollectionsMeta(app, config.roles, auth, config.collections);
   for (const col of config.collections) {
     mountCollection(app, ctx, config.roles, auth, col);
   }

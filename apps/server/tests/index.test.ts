@@ -268,3 +268,30 @@ test("listRows rejects an unknown column", async () => {
     code: "validation",
   });
 });
+
+test("GET /api/admin_collections returns metadata, admin-only", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*", viewer: "read" },
+      collections: [collection(posts, { name: "posts", title: "title" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const ok = await app.request("/api/admin_collections", { headers: { "x-role": "admin" } });
+  expect(ok.status).toBe(200);
+  const meta = (await ok.json()) as {
+    name: string;
+    primaryKey: string;
+    columns: { name: string }[];
+  }[];
+  const posts0 = meta.find((m) => m.name === "posts");
+  expect(posts0?.primaryKey).toBe("id");
+  expect(posts0?.columns.map((col) => col.name).sort()).toEqual(["id", "title", "views"]);
+
+  // viewer (read shorthand) is NOT admin → 403
+  const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
+  expect(denied.status).toBe(403);
+});
