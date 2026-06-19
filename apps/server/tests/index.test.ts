@@ -184,6 +184,35 @@ test("keys: admin can create, list, and delete via HTTP", async () => {
   expect(del.status).toBe(204);
 });
 
+test("GET list supports limit/offset/sort/filter and sets X-Total-Count", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  for (let i = 0; i < 4; i++) {
+    await ctx.db.run(sql.raw(`INSERT INTO posts (id,title,views) VALUES ('p${i}','t${i}',${i})`));
+  }
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?limit=2&sort=-views", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  expect(res.headers.get("X-Total-Count")).toBe("4");
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id)).toEqual(["p3", "p2"]);
+
+  const bad = await app.request("/api/posts?nope=1", { headers: { "x-role": "admin" } });
+  expect(bad.status).toBe(400);
+});
+
 test("keys: viewer (read shorthand) is forbidden — admin-only", async () => {
   expect((await app.request("/api/admin_keys", { headers: { "x-role": "viewer" } })).status).toBe(
     403,

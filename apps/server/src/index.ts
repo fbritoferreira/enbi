@@ -11,7 +11,16 @@ import {
 } from "@enbi/auth";
 import { listRevisions, restoreRevision, writeRevision } from "@enbi/core";
 import { Hono } from "hono";
-import { deleteRow, getRow, insertRow, listRows, type Row, updateRow } from "./crud.ts";
+import {
+  countRows,
+  deleteRow,
+  getRow,
+  insertRow,
+  type ListFilter,
+  listRows,
+  type Row,
+  updateRow,
+} from "./crud.ts";
 import { errorHandler } from "./errors.ts";
 import { mountKeys } from "./keys.ts";
 import { authorize } from "./guard.ts";
@@ -55,7 +64,32 @@ function mountCollection(
 
   app.get(base, async (c) => {
     await authorize(auth, roles, col, "read", c.req.raw.headers);
-    return c.json(await listRows(ctx.db, col.table));
+    const q = c.req.query();
+    const reserved = new Set(["limit", "offset", "sort"]);
+    const filters: ListFilter[] = Object.entries(q)
+      .filter(([k]) => !reserved.has(k))
+      .map(([column, value]) => ({ column, value }));
+    const sortRaw = q.sort;
+    const sort = sortRaw
+      ? {
+          column: sortRaw.replace(/^-/, ""),
+          dir: sortRaw.startsWith("-") ? ("desc" as const) : ("asc" as const),
+        }
+      : undefined;
+    const limit = q.limit !== undefined ? Math.min(Number(q.limit) || 0, 100) : undefined;
+    const offset = q.offset !== undefined ? Number(q.offset) || 0 : undefined;
+    // assertColumn (via listRows/countRows) throws EnbiError("validation") → 400 for unknown columns/sort.
+    try {
+      const total = await countRows(ctx.db, col.table, filters);
+      const rows = await listRows(ctx.db, col.table, { limit, offset, sort, filters });
+      c.header("X-Total-Count", String(total));
+      return c.json(rows);
+    } catch (err) {
+      if (err instanceof EnbiError && err.code === "validation") {
+        return c.json({ error: err.code, message: err.message }, 400);
+      }
+      throw err;
+    }
   });
 
   app.post(base, async (c) => {
