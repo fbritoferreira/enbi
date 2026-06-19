@@ -206,3 +206,36 @@ test("creating a duplicate id is a conflict (409)", async () => {
   );
   expect(again.status).toBe(409);
 });
+
+test("listRows paginates, sorts, and filters", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  const { listRows, countRows } = await import("../src/crud.ts");
+  for (let i = 0; i < 5; i++) {
+    await ctx.db.run(sql.raw(`INSERT INTO posts (id,title,views) VALUES ('p${i}','t${i}',${i})`));
+  }
+  const page = await listRows(ctx.db, posts, {
+    limit: 2,
+    offset: 1,
+    sort: { column: "views", dir: "desc" },
+  });
+  expect(page.map((r) => r.id)).toEqual(["p3", "p2"]);
+  const filtered = await listRows(ctx.db, posts, { filters: [{ column: "title", value: "t4" }] });
+  expect(filtered).toHaveLength(1);
+  expect(await countRows(ctx.db, posts, [{ column: "title", value: "t4" }])).toBe(1);
+});
+
+test("listRows rejects an unknown column", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  const { listRows } = await import("../src/crud.ts");
+  await expect(
+    listRows(ctx.db, posts, { filters: [{ column: "nope", value: "x" }] }),
+  ).rejects.toMatchObject({
+    code: "validation",
+  });
+});
