@@ -164,6 +164,22 @@ export async function createServer(
   const ctx = opts.db ?? (await createDb(config.db));
   const app = new Hono();
   app.onError(errorHandler);
+
+  const adminOrigin = config.admin?.origin;
+  if (adminOrigin) {
+    const { cors } = await import("hono/cors");
+    app.use(
+      "*",
+      cors({
+        origin: adminOrigin,
+        credentials: true,
+        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowHeaders: ["content-type", "x-api-key", "authorization"],
+        exposeHeaders: ["X-Total-Count"],
+      }),
+    );
+  }
+
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   let auth = opts.authProvider;

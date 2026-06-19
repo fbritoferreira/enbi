@@ -269,6 +269,35 @@ test("listRows rejects an unknown column", async () => {
   });
 });
 
+test("CORS headers are sent only when admin.origin is configured", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const base = {
+    db: { dialect: "sqlite" as const, url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" as const },
+    collections: [collection(posts, { name: "posts", public: ["read"] as const })],
+  };
+
+  const withCors = await createServer(
+    { ...base, admin: { origin: "http://localhost:4321" } },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const r = await withCors.request("/api/posts", { headers: { origin: "http://localhost:4321" } });
+  expect(r.headers.get("access-control-allow-origin")).toBe("http://localhost:4321");
+  expect(r.headers.get("access-control-allow-credentials")).toBe("true");
+
+  const pre = await withCors.request("/api/posts", {
+    method: "OPTIONS",
+    headers: { origin: "http://localhost:4321", "access-control-request-method": "POST" },
+  });
+  expect(pre.status === 204 || pre.status === 200).toBe(true);
+
+  const ctx2 = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const noCors = await createServer(base, { db: ctx2, authProvider: stubAuth });
+  const r2 = await noCors.request("/api/posts", { headers: { origin: "http://localhost:4321" } });
+  expect(r2.headers.get("access-control-allow-origin")).toBeNull();
+});
+
 test("GET /api/admin_collections returns metadata, admin-only", async () => {
   const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
   const app = await createServer(
