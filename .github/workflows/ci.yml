@@ -22,12 +22,12 @@ jobs:
       contents: read
     steps:
       # Pinned to commit SHAs (ADR-0008). Bump via Renovate/Dependabot.
-      # Egress is in AUDIT mode while we enumerate every endpoint setup-vp + the
-      # vp tool downloads touch; flip to `block` once the audit run confirms the
-      # full allowlist. Known-required endpoints are listed for that switch. (ADR-0013)
+      # Egress is enforced in BLOCK mode; the allowlist enumerates every endpoint
+      # setup-vp, the vp tool downloads, and the testcontainers image pulls touch.
+      # Add a host here if a run reports it blocked. (ADR-0013, ADR-0040)
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
-          egress-policy: audit
+          egress-policy: block
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -37,6 +37,10 @@ jobs:
             viteplus.dev:443
             registry.npmjs.org:443
             nodejs.org:443
+            auth.docker.io:443
+            registry-1.docker.io:443
+            index.docker.io:443
+            production.cloudfront.docker.com:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
         with:
@@ -68,6 +72,12 @@ jobs:
     permissions:
       contents: read
     steps:
+      # AUDIT (not block) for e2e: `playwright install chromium` downloads the
+      # browser from cdn.playwright.dev, which is CDN-fronted with rotating IPs —
+      # harden-runner's block mode allows the domain's resolved IPs but the CDN
+      # serves the binary from a different IP, causing ECONNREFUSED. The `verify`
+      # job enforces block over the main supply-chain surface; e2e stays audited
+      # with the full enumerated allowlist. (ADR-0040)
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
           egress-policy: audit
@@ -82,8 +92,12 @@ jobs:
             nodejs.org:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
-            playwright.azureedge.net:443
             cdn.playwright.dev:443
+            playwright.download.prss.microsoft.com:443
+            auth.docker.io:443
+            registry-1.docker.io:443
+            index.docker.io:443
+            production.cloudfront.docker.com:443
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1
         with:
@@ -92,7 +106,9 @@ jobs:
       - run: corepack enable
       - run: vp install --frozen-lockfile
       - run: vp run -r build
-      - run: pnpm exec playwright install --with-deps chromium
+      # No --with-deps: it runs apt-get (Ubuntu mirrors) which egress block would
+      # reject; GitHub's ubuntu-latest preinstalls the browser system libraries.
+      - run: pnpm exec playwright install chromium
       - run: pnpm exec playwright test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() }}

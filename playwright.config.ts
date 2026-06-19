@@ -16,8 +16,18 @@ export default defineConfig({
   reporter: "line",
   // Send Origin so better-auth's CSRF check passes (it matches the configured baseURL).
   use: { baseURL: BASE, extraHTTPHeaders: { origin: BASE } },
+  // `admin` runs FIRST: all e2e projects share one server + db (workers:1,
+  // sequential), and the first-ever signup becomes the bootstrap admin (ADR-0034).
+  // The admin UI flow needs an admin-role session (read metadata + content CRUD),
+  // so its signup must be the first one. The api/sso projects create their own
+  // unique (non-first → default-role) users afterward and are order-independent.
   projects: [
-    { name: "api", testIgnore: /sso\.spec\.ts/ },
+    {
+      name: "admin",
+      testMatch: /admin\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], baseURL: "http://localhost:4321" },
+    },
+    { name: "api", testIgnore: /sso\.spec\.ts|admin\.spec\.ts/ },
     { name: "sso", testMatch: /sso\.spec\.ts/, use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {

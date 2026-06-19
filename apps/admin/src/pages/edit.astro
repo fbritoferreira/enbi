@@ -1,0 +1,82 @@
+---
+import Admin from "../layouts/Admin.astro";
+---
+<Admin title="Edit — enbi">
+  <h1 id="heading">Entry</h1>
+  <form id="form"></form>
+  <button id="del" hidden>Delete</button>
+  <p class="error" id="err" hidden></p>
+  <script>
+    import { enbiFetch, escapeHtml } from "../lib/api.ts";
+    const sp = new URLSearchParams(location.search);
+    const name = sp.get("c") ?? "";
+    const id = sp.get("id") ?? "new";
+    const isNew = id === "new";
+
+    const heading = document.getElementById("heading");
+    if (heading) heading.textContent = isNew ? `New ${name}` : `Edit ${name}/${id}`;
+
+    const form = document.getElementById("form") as HTMLFormElement | null;
+    const errEl = document.getElementById("err");
+
+    const showErr = (m: string) => {
+      if (errEl) { errEl.hidden = false; errEl.textContent = m; }
+    };
+
+    const metaRes = await enbiFetch("/api/admin_collections");
+    if (metaRes.status !== 401) {
+      type ColMeta = { name: string; primaryKey: string; columns: { name: string }[] };
+      const meta = (await metaRes.json()) as ColMeta[];
+      const col = meta.find((m) => m.name === name);
+
+      if (!col || !form) {
+        showErr("Collection not found.");
+      } else {
+        let current: Record<string, unknown> = {};
+        if (!isNew) {
+          const r = await enbiFetch(`/api/${name}/${encodeURIComponent(id)}`);
+          if (r.ok) current = await r.json() as Record<string, unknown>;
+        }
+
+        form.innerHTML = col.columns
+          .map(
+            (c) =>
+              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${!isNew && c.name === col.primaryKey ? "readonly" : ""} />`,
+          )
+          .join("") + `<button type="submit">Save</button>`;
+
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const body: Record<string, string> = {};
+          for (const c of col.columns) {
+            const input = document.getElementById(`f_${c.name}`) as HTMLInputElement | null;
+            body[c.name] = input ? input.value : "";
+          }
+          const res = isNew
+            ? await enbiFetch(`/api/${name}`, { method: "POST", body: JSON.stringify(body) })
+            : await enbiFetch(`/api/${name}/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) });
+          if (res.ok) {
+            location.href = `/entries?c=${encodeURIComponent(name)}`;
+          } else {
+            showErr(`Save failed (${res.status}).`);
+          }
+        });
+
+        const del = document.getElementById("del") as HTMLButtonElement | null;
+        if (!isNew && del) {
+          del.hidden = false;
+          del.addEventListener("click", async () => {
+            const res = await enbiFetch(`/api/${name}/${encodeURIComponent(id)}`, { method: "DELETE" });
+            if (res.ok) {
+              location.href = `/entries?c=${encodeURIComponent(name)}`;
+            } else {
+              showErr(`Delete failed (${res.status}).`);
+            }
+          });
+        }
+      }
+    } else {
+      location.href = "/login";
+    }
+  </script>
+</Admin>

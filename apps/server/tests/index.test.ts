@@ -184,6 +184,35 @@ test("keys: admin can create, list, and delete via HTTP", async () => {
   expect(del.status).toBe(204);
 });
 
+test("GET list supports limit/offset/sort/filter and sets X-Total-Count", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  for (let i = 0; i < 4; i++) {
+    await ctx.db.run(sql.raw(`INSERT INTO posts (id,title,views) VALUES ('p${i}','t${i}',${i})`));
+  }
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?limit=2&sort=-views", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  expect(res.headers.get("X-Total-Count")).toBe("4");
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id)).toEqual(["p3", "p2"]);
+
+  const bad = await app.request("/api/posts?nope=1", { headers: { "x-role": "admin" } });
+  expect(bad.status).toBe(400);
+});
+
 test("keys: viewer (read shorthand) is forbidden — admin-only", async () => {
   expect((await app.request("/api/admin_keys", { headers: { "x-role": "viewer" } })).status).toBe(
     403,
@@ -205,4 +234,93 @@ test("creating a duplicate id is a conflict (409)", async () => {
     json("editor", { id: "dup", title: "b", views: 0 }),
   );
   expect(again.status).toBe(409);
+});
+
+test("listRows paginates, sorts, and filters", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  const { listRows, countRows } = await import("../src/crud.ts");
+  for (let i = 0; i < 5; i++) {
+    await ctx.db.run(sql.raw(`INSERT INTO posts (id,title,views) VALUES ('p${i}','t${i}',${i})`));
+  }
+  const page = await listRows(ctx.db, posts, {
+    limit: 2,
+    offset: 1,
+    sort: { column: "views", dir: "desc" },
+  });
+  expect(page.map((r) => r.id)).toEqual(["p3", "p2"]);
+  const filtered = await listRows(ctx.db, posts, { filters: [{ column: "title", value: "t4" }] });
+  expect(filtered).toHaveLength(1);
+  expect(await countRows(ctx.db, posts, [{ column: "title", value: "t4" }])).toBe(1);
+});
+
+test("listRows rejects an unknown column", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  const { listRows } = await import("../src/crud.ts");
+  await expect(
+    listRows(ctx.db, posts, { filters: [{ column: "nope", value: "x" }] }),
+  ).rejects.toMatchObject({
+    code: "validation",
+  });
+});
+
+test("CORS headers are sent only when admin.origin is configured", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const base = {
+    db: { dialect: "sqlite" as const, url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" as const },
+    collections: [collection(posts, { name: "posts", public: ["read"] as const })],
+  };
+
+  const withCors = await createServer(
+    { ...base, admin: { origin: "http://localhost:4321" } },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const r = await withCors.request("/api/posts", { headers: { origin: "http://localhost:4321" } });
+  expect(r.headers.get("access-control-allow-origin")).toBe("http://localhost:4321");
+  expect(r.headers.get("access-control-allow-credentials")).toBe("true");
+
+  const pre = await withCors.request("/api/posts", {
+    method: "OPTIONS",
+    headers: { origin: "http://localhost:4321", "access-control-request-method": "POST" },
+  });
+  expect(pre.status === 204 || pre.status === 200).toBe(true);
+
+  const ctx2 = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const noCors = await createServer(base, { db: ctx2, authProvider: stubAuth });
+  const r2 = await noCors.request("/api/posts", { headers: { origin: "http://localhost:4321" } });
+  expect(r2.headers.get("access-control-allow-origin")).toBeNull();
+});
+
+test("GET /api/admin_collections returns metadata, admin-only", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*", viewer: "read" },
+      collections: [collection(posts, { name: "posts", title: "title" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const ok = await app.request("/api/admin_collections", { headers: { "x-role": "admin" } });
+  expect(ok.status).toBe(200);
+  const meta = (await ok.json()) as {
+    name: string;
+    primaryKey: string;
+    columns: { name: string }[];
+  }[];
+  const posts0 = meta.find((m) => m.name === "posts");
+  expect(posts0?.primaryKey).toBe("id");
+  expect(posts0?.columns.map((col) => col.name).sort()).toEqual(["id", "title", "views"]);
+
+  // viewer (read shorthand) is NOT admin → 403
+  const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
+  expect(denied.status).toBe(403);
 });

@@ -30,4 +30,7 @@ export default defineEnbiConfig({
   },
   roles: { admin: "*", viewer: "read" },
   collections: [collection(posts, { name: "posts" })],
+  admin: process.env.ENBI_E2E_ADMIN_ORIGIN
+    ? { origin: process.env.ENBI_E2E_ADMIN_ORIGIN }
+    : undefined,
 });

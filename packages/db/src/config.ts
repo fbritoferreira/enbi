@@ -50,6 +50,8 @@ export type EnbiConfig = {
   auth: EnbiAuthConfig;
   roles: Record<string, RolePermission>;
   collections: AnyCollection[];
+  /** Admin UI origin allowed to call the API with credentials (CORS). */
+  admin?: { origin?: string };
 };
 
 /** Identity helper that gives the user full type-checking on their config. */

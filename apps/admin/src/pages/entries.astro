@@ -1,0 +1,31 @@
+---
+import Admin from "../layouts/Admin.astro";
+---
+<Admin title="Entries — enbi">
+  <h1 id="title">Entries</h1>
+  <p><a id="new" href="#">+ New entry</a> · <input id="q" placeholder="search…" /></p>
+  <p id="page"></p>
+  <table><thead><tr><th>id</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  <script>
+    import { enbiFetch, escapeHtml } from "../lib/api.ts";
+    const name = new URLSearchParams(location.search).get("c") ?? "";
+    document.getElementById("title")!.textContent = name;
+    (document.getElementById("new") as HTMLAnchorElement).href = `/edit?c=${encodeURIComponent(name)}&id=new`;
+    const limit = 20; let offset = 0;
+    async function load() {
+      const q = (document.getElementById("q") as HTMLInputElement).value.trim();
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      if (q) params.set("id", q);
+      const res = await enbiFetch(`/api/${name}?${params.toString()}`);
+      if (res.status === 401) { location.href = "/login"; return; }
+      const total = Number(res.headers.get("X-Total-Count") ?? "0");
+      const rows = (await res.json()) as Record<string, unknown>[];
+      document.getElementById("page")!.textContent = `${rows.length ? offset + 1 : 0}–${offset + rows.length} of ${total}`;
+      document.getElementById("rows")!.innerHTML = rows
+        .map((r) => `<tr><td>${escapeHtml(r.id)}</td><td><a href="/edit?c=${encodeURIComponent(name)}&id=${encodeURIComponent(String(r.id))}">edit</a></td></tr>`)
+        .join("");
+    }
+    document.getElementById("q")!.addEventListener("input", () => { offset = 0; void load(); });
+    void load();
+  </script>
+</Admin>

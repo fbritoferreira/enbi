@@ -11,8 +11,18 @@ import {
 } from "@enbi/auth";
 import { listRevisions, restoreRevision, writeRevision } from "@enbi/core";
 import { Hono } from "hono";
-import { deleteRow, getRow, insertRow, listRows, type Row, updateRow } from "./crud.ts";
+import {
+  countRows,
+  deleteRow,
+  getRow,
+  insertRow,
+  type ListFilter,
+  listRows,
+  type Row,
+  updateRow,
+} from "./crud.ts";
 import { errorHandler } from "./errors.ts";
+import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
 import { authorize } from "./guard.ts";
 
@@ -55,7 +65,32 @@ function mountCollection(
 
   app.get(base, async (c) => {
     await authorize(auth, roles, col, "read", c.req.raw.headers);
-    return c.json(await listRows(ctx.db, col.table));
+    const q = c.req.query();
+    const reserved = new Set(["limit", "offset", "sort"]);
+    const filters: ListFilter[] = Object.entries(q)
+      .filter(([k]) => !reserved.has(k))
+      .map(([column, value]) => ({ column, value }));
+    const sortRaw = q.sort;
+    const sort = sortRaw
+      ? {
+          column: sortRaw.replace(/^-/, ""),
+          dir: sortRaw.startsWith("-") ? ("desc" as const) : ("asc" as const),
+        }
+      : undefined;
+    const limit = q.limit !== undefined ? Math.min(Number(q.limit) || 0, 100) : undefined;
+    const offset = q.offset !== undefined ? Number(q.offset) || 0 : undefined;
+    // assertColumn (via listRows/countRows) throws EnbiError("validation") → 400 for unknown columns/sort.
+    try {
+      const total = await countRows(ctx.db, col.table, filters);
+      const rows = await listRows(ctx.db, col.table, { limit, offset, sort, filters });
+      c.header("X-Total-Count", String(total));
+      return c.json(rows);
+    } catch (err) {
+      if (err instanceof EnbiError && err.code === "validation") {
+        return c.json({ error: err.code, message: err.message }, 400);
+      }
+      throw err;
+    }
   });
 
   app.post(base, async (c) => {
@@ -129,17 +164,35 @@ export async function createServer(
   const ctx = opts.db ?? (await createDb(config.db));
   const app = new Hono();
   app.onError(errorHandler);
+
+  const adminOrigin = config.admin?.origin;
+  if (adminOrigin) {
+    const { cors } = await import("hono/cors");
+    app.use(
+      "*",
+      cors({
+        origin: adminOrigin,
+        credentials: true,
+        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowHeaders: ["content-type", "x-api-key", "authorization"],
+        exposeHeaders: ["X-Total-Count"],
+      }),
+    );
+  }
+
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   let auth = opts.authProvider;
   if (!auth) {
-    const instance = createAuth(ctx, config.auth);
+    const trustedOrigins = adminOrigin ? [adminOrigin] : undefined;
+    const instance = createAuth(ctx, config.auth, trustedOrigins);
     app.on(["GET", "POST"], `${AUTH_BASE_PATH}/*`, (c) => instance.handler(c.req.raw));
     // API key (x-api-key / Bearer) is tried first, then a better-auth session.
     auth = composeProviders(apiKeyProvider(ctx.db, ctx.apiKeys), betterAuthProvider(instance));
   }
 
   mountKeys(app, ctx, config.roles, auth);
+  mountCollectionsMeta(app, config.roles, auth, config.collections);
   for (const col of config.collections) {
     mountCollection(app, ctx, config.roles, auth, col);
   }
