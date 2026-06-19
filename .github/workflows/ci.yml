@@ -22,9 +22,9 @@ jobs:
       contents: read
     steps:
       # Pinned to commit SHAs (ADR-0008). Bump via Renovate/Dependabot.
-      # Egress is in AUDIT mode while we enumerate every endpoint setup-vp + the
-      # vp tool downloads touch; flip to `block` once the audit run confirms the
-      # full allowlist. Known-required endpoints are listed for that switch. (ADR-0013)
+      # Egress is enforced in BLOCK mode; the allowlist enumerates every endpoint
+      # setup-vp, the vp tool downloads, and the testcontainers image pulls touch.
+      # Add a host here if a run reports it blocked. (ADR-0013, ADR-0040)
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
           egress-policy: block
