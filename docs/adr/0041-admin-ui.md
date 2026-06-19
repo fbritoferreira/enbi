@@ -49,7 +49,7 @@ The Astro admin gains a functional core consisting of:
 - **Entry list** — fetches `GET /api/<collection>` (with `?limit`/`?offset` pagination from
   ADR 0038) and renders a table of entries for the selected collection.
 - **Entry create/edit form** — renders fields from the `admin_collections` metadata; submits to
-  `POST /api/<collection>` or `PATCH /api/<collection>/:id`.
+  `POST /api/<collection>` or `PUT /api/<collection>/:id`.
 - **API-key management** — lists, creates, and revokes API keys via the HTTP key-management
   endpoints from ADR 0034.
 

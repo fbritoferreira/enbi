@@ -17,8 +17,8 @@ By this point the endpoint set is stable:
 - **Testcontainers / Docker Hub** — `auth.docker.io`, `registry-1.docker.io`, `index.docker.io`,
   `production.cloudfront.docker.com` — required to pull database images and the Ryuk reaper
   container used by testcontainers for container lifecycle management.
-- **Playwright browser binaries** (`playwright.azureedge.net`) — `playwright install` fetches
-  browser archives.
+- **Playwright browser binaries** (`cdn.playwright.dev`, with `playwright.download.prss.microsoft.com`
+  as the fallback mirror) — `playwright install` fetches browser archives.
 
 A separate change dropped `--with-deps` from `playwright install`. The `--with-deps` flag
 installs system-level apt packages (OS libraries) from Ubuntu mirrors, which are not enumerable in

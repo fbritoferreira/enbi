@@ -21,7 +21,7 @@ Two separate validation layers already exist in the server:
 
 The list handler gains the following optional query parameters:
 
-- `?limit=N` — page size, integer 1–100 (capped at 100; defaults to all rows when omitted for
+- `?limit=N` — page size, integer capped at 100 (defaults to all rows when omitted for
   backward compatibility).
 - `?offset=N` — number of rows to skip before returning results; defaults to 0.
 - `?sort=field` / `?sort=-field` — sort ascending or descending by the named column.
