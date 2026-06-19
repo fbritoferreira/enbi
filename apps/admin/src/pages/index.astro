@@ -1,17 +1,18 @@
 ---
-const apiBase = import.meta.env.PUBLIC_ENBI_API ?? "http://localhost:3000";
+import Admin from "../layouts/Admin.astro";
 ---
-
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>enbi admin</title>
-	</head>
-	<body>
-		<h1>enbi admin</h1>
-		<p>Content server: {apiBase}</p>
-	</body>
-</html>
+<Admin title="Collections — enbi">
+  <h1>Collections</h1>
+  <ul id="list"><li>Loading…</li></ul>
+  <script>
+    import { enbiFetch } from "../lib/api.ts";
+    const ul = document.getElementById("list")!;
+    const res = await enbiFetch("/api/admin_collections");
+    if (res.status === 401) { window.location.href = "/login"; }
+    else if (!res.ok) { ul.innerHTML = `<li class="error">Failed (${res.status})</li>`; }
+    else {
+      const cols = (await res.json()) as { name: string; title: string | null }[];
+      ul.innerHTML = cols.map((c) => `<li><a href="/entries?c=${encodeURIComponent(c.name)}">${c.name}</a></li>`).join("") || "<li>No collections.</li>";
+    }
+  </script>
+</Admin>
