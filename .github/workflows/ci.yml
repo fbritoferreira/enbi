@@ -72,9 +72,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      # AUDIT (not block) for e2e: `playwright install chromium` downloads the
+      # browser from cdn.playwright.dev, which is CDN-fronted with rotating IPs —
+      # harden-runner's block mode allows the domain's resolved IPs but the CDN
+      # serves the binary from a different IP, causing ECONNREFUSED. The `verify`
+      # job enforces block over the main supply-chain surface; e2e stays audited
+      # with the full enumerated allowlist. (ADR-0040)
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2
         with:
-          egress-policy: block
+          egress-policy: audit
           allowed-endpoints: >
             github.com:443
             api.github.com:443

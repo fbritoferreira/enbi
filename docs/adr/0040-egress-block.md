@@ -28,17 +28,18 @@ is unnecessary and its removal shrinks the required allowlist to a closed, enume
 
 ## Decision
 
-The `verify` and `e2e` jobs in `.github/workflows/ci.yml` flip `egress-policy` from `audit` to
-`block`. The `allowed-endpoints` list is updated to include:
+The `verify` job in `.github/workflows/ci.yml` flips `egress-policy` from `audit` to `block`. Its
+`allowed-endpoints` covers npm, the GitHub APIs, and the four Docker Hub endpoints required by
+testcontainers and Ryuk (`auth.docker.io:443`, `registry-1.docker.io:443`, `index.docker.io:443`,
+`production.cloudfront.docker.com:443`) — the cross-dialect Postgres/MySQL suite pulls those.
 
-- All previously recorded npm and GitHub endpoints.
-- The four Docker Hub endpoints required by testcontainers and Ryuk:
-  `auth.docker.io:443`, `registry-1.docker.io:443`, `index.docker.io:443`,
-  `production.cloudfront.docker.com:443`.
-- The Playwright CDN endpoint for browser binary downloads.
-
-`playwright install` is called **without** `--with-deps` to avoid triggering apt traffic to Ubuntu
-mirrors, which cannot be cleanly enumerated.
+The `e2e` job **stays in `audit`** mode. `playwright install chromium` downloads the browser from
+`cdn.playwright.dev`, which is CDN-fronted with rotating IPs: harden-runner's block mode allows the
+domain's resolved IPs, but the CDN serves the binary archive from a different IP, producing
+`ECONNREFUSED`. Enumerating the CDN's rotating IP pool is not feasible, so blocking e2e would make
+the browser install intermittently fail. The e2e job keeps its full enumerated allowlist for
+observability. `playwright install` is called **without** `--with-deps` regardless, to avoid apt
+traffic to non-enumerable Ubuntu mirrors.
 
 If a future dependency introduces a new outbound host, CI fails visibly on that job. The fix is to
 add the host to the allowlist (with an ADR update or inline comment explaining why), not to revert
@@ -51,10 +52,13 @@ to audit mode.
 - **Good:** the allowlist documents every host the CI pipeline touches, making security review
   straightforward.
 - **Good:** dropping `--with-deps` removes a large, non-enumerable apt dependency surface.
-- **Cost:** any new dependency that phones home to an undiscovered host will break CI. This is the
-  intended behaviour — the break is a signal, not a bug.
-- **Operational:** the allowlist must be kept current. If a host is still missing after a block
-  failure, add it to the list after verifying it is legitimate, then re-run CI.
+- **Cost:** any new dependency that phones home to an undiscovered host will break the `verify`
+  job. This is the intended behaviour — the break is a signal, not a bug.
+- **Limitation:** the `e2e` job cannot enforce block while it downloads a CDN-fronted Playwright
+  browser (rotating IPs). It remains in audit. Closing this would require pre-caching the browser
+  or a pinned-IP mirror; deferred.
+- **Operational:** the `verify` allowlist must be kept current. If a host is still missing after a
+  block failure, add it after verifying it is legitimate, then re-run CI.
 
 ## Alternatives considered
 
