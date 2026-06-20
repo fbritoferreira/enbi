@@ -843,7 +843,6 @@ test("drafts: public list sees only published rows", async () => {
       auth: { secret: "x" },
       roles: { admin: "*" },
       collections: [
-        // @ts-expect-error -- drafts option not yet in CollectionOptions (TDD: will pass after Task 2)
         collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
       ],
     },
@@ -883,7 +882,6 @@ test("drafts: public GET of a draft row returns 404; admin sees it", async () =>
       auth: { secret: "x" },
       roles: { admin: "*" },
       collections: [
-        // @ts-expect-error -- drafts option not yet in CollectionOptions (TDD: will pass after Task 2)
         collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
       ],
     },
@@ -917,7 +915,6 @@ test("drafts: POST without status (admin) defaults to draft; public list exclude
       auth: { secret: "x" },
       roles: { admin: "*" },
       collections: [
-        // @ts-expect-error -- drafts option not yet in CollectionOptions (TDD: will pass after Task 2)
         collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
       ],
     },
