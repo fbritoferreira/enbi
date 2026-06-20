@@ -84,7 +84,8 @@ export function validateFields(
     if (rule.min !== undefined || rule.max !== undefined) {
       const isStr = typeof value === "string";
       const isNum =
-        rule.type === "number" || (rule.type === undefined && isNumeric(value) && !isStr);
+        rule.type === "number" ||
+        (rule.type === undefined && isNumeric(value) && !isStr && typeof value !== "boolean");
 
       if (isStr) {
         const len = (value as string).length;

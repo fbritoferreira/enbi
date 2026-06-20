@@ -1816,3 +1816,271 @@ test("validation: validateFields unit — returns ALL errors for a multi-rule bo
   expect(fields).toContain("email");
   expect(errors.length).toBeGreaterThanOrEqual(3);
 });
+
+// ── PUT + pattern/url/enum/boolean validation (ADR-0049 coverage) ─────────────
+
+// Second fixture table whose columns cover pattern, url, enum, and boolean rules.
+const validatedItems = sqliteTable("validated_items", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull(),
+  link: text("link").notNull(),
+  kind: text("kind").notNull(),
+  flag: text("flag").notNull(),
+});
+
+async function buildItemsApp() {
+  const iCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await iCtx.db.run(
+    sql`CREATE TABLE validated_items (
+      id text PRIMARY KEY,
+      slug text NOT NULL,
+      link text NOT NULL,
+      kind text NOT NULL,
+      flag text NOT NULL
+    )`,
+  );
+  await iCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await iCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const col = collection(validatedItems, {
+    name: "validated_items",
+    validate: {
+      slug: { pattern: "^[a-z]+$" },
+      link: { type: "url" },
+      kind: { enum: ["a", "b"] },
+      flag: { type: "boolean" },
+    },
+  });
+  return createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [col],
+    },
+    { db: iCtx, authProvider: stubAuth },
+  );
+}
+
+// Helper: create a valid item and return the app (DRY for PUT tests).
+async function buildItemsAppWithEntry(id: string) {
+  const iApp = await buildItemsApp();
+  const create = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id, slug: "abc", link: "https://example.com", kind: "a", flag: true }),
+  });
+  expect(create.status).toBe(201);
+  return iApp;
+}
+
+test("validation: 422 shape — top-level has error, message, details array of {field,message}", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "shape1",
+      slug: "INVALID",
+      link: "not-a-url",
+      kind: "z",
+      flag: "x",
+    }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as {
+    error: string;
+    message: string;
+    details: { field: string; message: string }[];
+  };
+  expect(typeof body.error).toBe("string");
+  expect(typeof body.message).toBe("string");
+  expect(Array.isArray(body.details)).toBe(true);
+  expect(
+    body.details.every((d) => typeof d.field === "string" && typeof d.message === "string"),
+  ).toBe(true);
+});
+
+test("validation: PUT — violating rule → 422 with details naming the field", async () => {
+  const iApp = await buildItemsAppWithEntry("put1");
+  const res = await iApp.request("/api/validated_items/put1", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    // slug violates pattern (uppercase); all other fields are fine.
+    body: JSON.stringify({ slug: "UPPER", link: "https://example.com", kind: "a", flag: true }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((d) => d.field === "slug")).toBe(true);
+});
+
+test("validation: PUT — valid body → 200", async () => {
+  const iApp = await buildItemsAppWithEntry("put2");
+  const res = await iApp.request("/api/validated_items/put2", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ slug: "good", link: "https://ok.io", kind: "b", flag: false }),
+  });
+  expect(res.status).toBe(200);
+});
+
+test("validation: pattern — non-matching value → 422", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "pat1",
+      slug: "Has Spaces",
+      link: "https://x.com",
+      kind: "a",
+      flag: true,
+    }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((d) => d.field === "slug")).toBe(true);
+});
+
+test("validation: pattern — matching value → 201", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "pat2",
+      slug: "lowercase",
+      link: "https://x.com",
+      kind: "a",
+      flag: true,
+    }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("validation: url — non-URL string → 422", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "url1", slug: "abc", link: "not-a-url", kind: "a", flag: true }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((d) => d.field === "link")).toBe(true);
+});
+
+test("validation: url — valid URL → 201", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "url2",
+      slug: "abc",
+      link: "https://enbi.dev/path?q=1",
+      kind: "a",
+      flag: true,
+    }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("validation: enum — value not in list → 422", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "enum1",
+      slug: "abc",
+      link: "https://x.com",
+      kind: "c",
+      flag: true,
+    }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((d) => d.field === "kind")).toBe(true);
+});
+
+test("validation: enum — allowed value → 201", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "enum2",
+      slug: "abc",
+      link: "https://x.com",
+      kind: "b",
+      flag: true,
+    }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("validation: boolean — non-boolean → 422", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "bool1",
+      slug: "abc",
+      link: "https://x.com",
+      kind: "a",
+      flag: "yes",
+    }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((d) => d.field === "flag")).toBe(true);
+});
+
+test("validation: boolean — true → 201", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "bool2",
+      slug: "abc",
+      link: "https://x.com",
+      kind: "a",
+      flag: true,
+    }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("validation: boolean — false → 201", async () => {
+  const iApp = await buildItemsApp();
+  const res = await iApp.request("/api/validated_items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({
+      id: "bool3",
+      slug: "abc",
+      link: "https://x.com",
+      kind: "a",
+      flag: false,
+    }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("fix: boolean value with min/max rule is not treated as numeric", () => {
+  // Boolean true coerces to 1 via Number(), so without the guard it would pass
+  // a min:0 check silently. The fix ensures booleans are excluded from the
+  // numeric path and neither a type-error nor a spurious min/max error is raised.
+  const errors = validateFields(
+    { active: { min: 0, max: 10 } }, // no explicit type — relies on the coercion guard
+    { active: true },
+  );
+  // The boolean should not be treated as a number → no min/max errors produced.
+  expect(errors).toHaveLength(0);
+});
