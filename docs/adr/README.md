@@ -41,4 +41,19 @@ to change a decision, add a new ADR that supersedes the old one (don't edit hist
 | [0033](0033-admin-route-prefix.md)                    | System routes are namespaced under `admin_`                            | Accepted           |
 | [0034](0034-http-key-management.md)                   | HTTP API-key management, admin-gated, first-user bootstrap             | Accepted           |
 | [0035](0035-cross-dialect-testcontainers.md)          | Cross-dialect testing with testcontainers                              | Accepted           |
+| [0036](0036-sso-e2e-mock-idp.md)                      | SSO e2e against a mock OIDC provider (testcontainers + browser)        | Accepted           |
+| [0037](0037-testable-dev-build.md)                    | Testable `enbi dev`/`build` via closable handles + artifact assertion  | Accepted           |
+| [0038](0038-query-pagination.md)                      | Content list query params: offset pagination + equality filters        | Accepted           |
+| [0039](0039-auth-setup.md)                            | `enbi auth setup` prints a config snippet and seeds `.env.example`     | Accepted           |
+| [0040](0040-egress-block.md)                          | CI egress flipped from audit to block with a known-good allowlist      | Accepted           |
+| [0041](0041-admin-ui.md)                              | Astro admin functional core: login, collections, entry CRUD, keys      | Accepted           |
+| [0042](0042-richer-query.md)                          | Richer query: filter operators, match mode, keyset cursor pagination   | Accepted           |
+| [0043](0043-admin-full.md)                            | Admin full: provider buttons, role management, revisions, search       | Accepted           |
+| [0044](0044-media-uploads.md)                         | Media uploads: local-disk store, `_media` table, public serving        | Accepted           |
+| [0045](0045-draft-publish.md)                         | Draft/publish: per-collection status-gated public visibility           | Accepted           |
+| [0046](0046-relations.md)                             | Relations: FK field → target collection with opt-in `?expand`          | Accepted           |
+| [0047](0047-webhooks.md)                              | Outbound webhooks on content mutations (HMAC, fire-and-forget)         | Accepted           |
+| [0048](0048-cross-site-cookie.md)                     | Cross-domain admin cookie support (`SameSite=None; Secure`)            | Accepted           |
+| [0049](0049-field-validation.md)                      | Per-collection field validation (required/type/min/max/pattern/enum)   | Accepted           |
+| [0050](0050-i18n.md)                                  | Field-level i18n via a `_translations` table + `?locale=` overlay      | Accepted           |
 | [0051](0051-admin-redesign-wysiwyg.md)                | Editorial Terminal design; first-run register; wysiwyg CKEditor widget | Accepted           |
