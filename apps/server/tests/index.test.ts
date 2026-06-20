@@ -23,6 +23,11 @@ const pages = sqliteTable("pages", {
   id: text("id").primaryKey(),
   body: text("body").notNull(),
 });
+const articles = sqliteTable("articles", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: text("status").notNull(),
+});
 
 // Stub auth: the `x-role` header is the caller's role; absent → anonymous.
 const stubAuth: AuthProvider = {
@@ -814,4 +819,157 @@ test("media: DELETE non-existent → 404", async () => {
     headers: { "x-role": "admin" },
   });
   expect(res.status).toBe(404);
+});
+
+// ── Drafts / publish tests (TDD) ─────────────────────────────────────────────
+
+test("drafts: public list sees only published rows", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Hello','published')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a2','Draft one','draft')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a3','Also published','published')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        // @ts-expect-error -- drafts option not yet in CollectionOptions (TDD: will pass after Task 2)
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public (no x-role) → only published
+  const pub = await app.request("/api/articles");
+  expect(pub.status).toBe(200);
+  const pubRows = (await pub.json()) as { id: string }[];
+  expect(pubRows.map((r) => r.id).sort()).toEqual(["a1", "a3"]);
+  expect(pub.headers.get("X-Total-Count")).toBe("2");
+
+  // Admin → sees all 3
+  const adm = await app.request("/api/articles", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  const admRows = (await adm.json()) as { id: string }[];
+  expect(admRows.map((r) => r.id).sort()).toEqual(["a1", "a2", "a3"]);
+  expect(adm.headers.get("X-Total-Count")).toBe("3");
+});
+
+test("drafts: public GET of a draft row returns 404; admin sees it", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Draft','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        // @ts-expect-error -- drafts option not yet in CollectionOptions (TDD: will pass after Task 2)
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public → 404 for a draft
+  const pub = await app.request("/api/articles/a1");
+  expect(pub.status).toBe(404);
+
+  // Admin → 200
+  const adm = await app.request("/api/articles/a1", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  expect(((await adm.json()) as { title: string }).title).toBe("Draft");
+});
+
+test("drafts: POST without status (admin) defaults to draft; public list excludes it", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        // @ts-expect-error -- drafts option not yet in CollectionOptions (TDD: will pass after Task 2)
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // POST without status field → defaults to draft
+  const create = await app.request("/api/articles", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "a1", title: "New article" }),
+  });
+  expect(create.status).toBe(201);
+  const created = (await create.json()) as { status: string };
+  expect(created.status).toBe("draft");
+
+  // Public list: draft is hidden
+  const pub = await app.request("/api/articles");
+  expect(pub.status).toBe(200);
+  const rows = (await pub.json()) as unknown[];
+  expect(rows).toHaveLength(0);
+  expect(pub.headers.get("X-Total-Count")).toBe("0");
+});
+
+test("drafts: non-drafts collection is unaffected — no status filtering", async () => {
+  // The existing `posts` collection has no drafts option.
+  // Insert a row and verify the public (no-auth, but posts requires auth via admin role)
+  // and admin get it unfiltered.
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const adm = await app.request("/api/posts", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  const rows = (await adm.json()) as { id: string }[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].id).toBe("p1");
 });
