@@ -1,3 +1,7 @@
+import { createHmac } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import {
   apiKeyProvider,
   type AuthProvider,
@@ -8,8 +12,9 @@ import {
 import { collection, createDb, defineEnbiConfig, type EnbiDb } from "@enbi/db";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { beforeEach, expect, test } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { createServer } from "../src/index.ts";
+import type { WebhookDelivery } from "../src/webhooks.ts";
 
 const posts = sqliteTable("posts", {
   id: text("id").primaryKey(),
@@ -19,6 +24,11 @@ const posts = sqliteTable("posts", {
 const pages = sqliteTable("pages", {
   id: text("id").primaryKey(),
   body: text("body").notNull(),
+});
+const articles = sqliteTable("articles", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: text("status").notNull(),
 });
 
 // Stub auth: the `x-role` header is the caller's role; absent → anonymous.
@@ -63,6 +73,9 @@ beforeEach(async () => {
   await ctx.db.run(sql`CREATE TABLE _api_keys (
     id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
     label text, created_at text NOT NULL, last_used_at text)`);
+  await ctx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
   app = await buildApp(ctx);
 });
 
@@ -574,6 +587,81 @@ test("fix: in-filter with >100 items returns 400 with correct message", async ()
   expect(body.message).toBe("Too many values in 'in' filter (max 100).");
 });
 
+// ── GET /api/admin_providers ─────────────────────────────────────────────────
+
+test("GET /api/admin_providers returns social and sso provider ids", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: {
+        secret: "x",
+        social: { github: { clientId: "gh-id", clientSecret: "gh-secret" } },
+        ssoProviders: [
+          {
+            providerId: "mock",
+            clientId: "mock-id",
+            clientSecret: "mock-secret",
+            authorizationUrl: "https://mock.example/oauth/authorize",
+            tokenUrl: "https://mock.example/oauth/token",
+          },
+        ],
+      },
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/admin_providers");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { social: string[]; sso: string[] };
+  expect(body.social).toEqual(["github"]);
+  expect(body.sso).toEqual(["mock"]);
+});
+
+test("GET /api/admin_providers returns empty arrays when no social/sso configured", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/admin_providers");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { social: string[]; sso: string[] };
+  expect(body.social).toEqual([]);
+  expect(body.sso).toEqual([]);
+});
+
+test("GET /api/admin_providers is accessible without authentication", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: {
+        secret: "x",
+        social: { google: { clientId: "g-id", clientSecret: "g-secret" } },
+      },
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // No headers at all — no x-role, no x-api-key, no Authorization
+  const res = await app.request("/api/admin_providers");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { social: string[]; sso: string[] };
+  expect(body.social).toEqual(["google"]);
+  expect(body.sso).toEqual([]);
+});
+
 test("GET /api/admin_collections returns metadata, admin-only", async () => {
   const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
   const app = await createServer(
@@ -599,4 +687,988 @@ test("GET /api/admin_collections returns metadata, admin-only", async () => {
   // viewer (read shorthand) is NOT admin → 403
   const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
   expect(denied.status).toBe(403);
+});
+
+// ── Media tests ──────────────────────────────────────────────────────────────
+
+let mediaDir: string;
+
+beforeEach(() => {
+  mediaDir = mkdtempSync(joinPath(tmpdir(), "enbi-media-"));
+});
+
+afterEach(() => {
+  rmSync(mediaDir, { recursive: true, force: true });
+});
+
+async function buildMediaApp(ctx: EnbiDb) {
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" },
+    collections: [],
+    media: { dir: mediaDir },
+  });
+  return createServer(config, { db: ctx, authProvider: stubAuth });
+}
+
+test("media: anonymous POST → 401", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const form = new FormData();
+  form.append("file", new Blob(["hello"], { type: "text/plain" }), "test.txt");
+  const res = await app.request("/api/admin_media", { method: "POST", body: form });
+  expect(res.status).toBe(401);
+});
+
+test("media: roundtrip — upload, list, serve, delete", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  // Upload
+  const form = new FormData();
+  form.append("file", new Blob(["hello world"], { type: "text/plain" }), "hello.txt");
+  const upload = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(upload.status).toBe(201);
+  const { id, url, filename, mime } = (await upload.json()) as {
+    id: string;
+    url: string;
+    filename: string;
+    mime: string;
+    size: number;
+  };
+  expect(id).toBeTruthy();
+  expect(url).toBe(`/api/media/${id}`);
+  expect(filename).toBe("hello.txt");
+  expect(mime).toBe("text/plain");
+
+  // List
+  const list = await app.request("/api/admin_media", { headers: { "x-role": "admin" } });
+  expect(list.status).toBe(200);
+  const rows = (await list.json()) as { id: string }[];
+  expect(rows.some((r) => r.id === id)).toBe(true);
+
+  // Serve (public — no auth header)
+  const serve = await app.request(`/api/media/${id}`);
+  expect(serve.status).toBe(200);
+  expect(serve.headers.get("content-type")).toBe("text/plain");
+  // Exact-bytes check: must equal uploaded payload precisely (not Buffer pool garbage)
+  const buf = new Uint8Array(await serve.arrayBuffer());
+  expect(buf.byteLength).toBe(11); // "hello world".length === 11
+  expect(new TextDecoder().decode(buf)).toBe("hello world");
+
+  // Delete
+  const del = await app.request(`/api/admin_media/${id}`, {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(del.status).toBe(204);
+
+  // Serve after delete → 404
+  const gone = await app.request(`/api/media/${id}`);
+  expect(gone.status).toBe(404);
+});
+
+test("media: POST without file → 400", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const form = new FormData();
+  // no file field
+  const res = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(422);
+});
+
+test("media: DELETE non-existent → 404", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const res = await app.request("/api/admin_media/does-not-exist", {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(404);
+});
+
+// ── Drafts / publish tests (TDD) ─────────────────────────────────────────────
+
+test("drafts: public list sees only published rows", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Hello','published')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a2','Draft one','draft')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a3','Also published','published')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public (no x-role) → only published
+  const pub = await app.request("/api/articles");
+  expect(pub.status).toBe(200);
+  const pubRows = (await pub.json()) as { id: string }[];
+  expect(pubRows.map((r) => r.id).sort()).toEqual(["a1", "a3"]);
+  expect(pub.headers.get("X-Total-Count")).toBe("2");
+
+  // Admin → sees all 3
+  const adm = await app.request("/api/articles", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  const admRows = (await adm.json()) as { id: string }[];
+  expect(admRows.map((r) => r.id).sort()).toEqual(["a1", "a2", "a3"]);
+  expect(adm.headers.get("X-Total-Count")).toBe("3");
+});
+
+test("drafts: public GET of a draft row returns 404; admin sees it", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Draft','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public → 404 for a draft
+  const pub = await app.request("/api/articles/a1");
+  expect(pub.status).toBe(404);
+
+  // Admin → 200
+  const adm = await app.request("/api/articles/a1", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  expect(((await adm.json()) as { title: string }).title).toBe("Draft");
+});
+
+test("drafts: POST without status (admin) defaults to draft; public list excludes it", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // POST without status field → defaults to draft
+  const create = await app.request("/api/articles", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "a1", title: "New article" }),
+  });
+  expect(create.status).toBe(201);
+  const created = (await create.json()) as { status: string };
+  expect(created.status).toBe("draft");
+
+  // Public list: draft is hidden
+  const pub = await app.request("/api/articles");
+  expect(pub.status).toBe(200);
+  const rows = (await pub.json()) as unknown[];
+  expect(rows).toHaveLength(0);
+  expect(pub.headers.get("X-Total-Count")).toBe("0");
+});
+
+test("drafts: _match=any does not leak draft rows to public callers", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Hello','published')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a2','Draft','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller with _match=any must NOT see the draft row.
+  // The server forces match="all" for public callers on drafts collections, so
+  // all user filters are AND-ed together with the mandatory status=published gate.
+  // A filter of status__ne=published combined (AND) with status__eq=published
+  // matches nothing — so no rows are returned at all, and critically the draft
+  // (a2) is not exposed.
+  const res = await app.request("/api/articles?status__ne=published&_match=any");
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  // Draft must not leak — the entire point of this test.
+  expect(rows.map((r) => r.id)).not.toContain("a2");
+  // Total reflects the AND-filtered result (no rows match both constraints)
+  expect(res.headers.get("X-Total-Count")).toBe("0");
+});
+
+test("drafts: public caller cannot access revisions of a draft entry", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Draft entry','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller → 404 on revisions of a draft entry
+  const pub = await app.request("/api/articles/a1/revisions");
+  expect(pub.status).toBe(404);
+
+  // Admin → can access revisions
+  const adm = await app.request("/api/articles/a1/revisions", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+});
+
+test("drafts: non-drafts collection is unaffected — no status filtering", async () => {
+  // The existing `posts` collection has no drafts option.
+  // Insert a row and verify the public (no-auth, but posts requires auth via admin role)
+  // and admin get it unfiltered.
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const adm = await app.request("/api/posts", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  const rows = (await adm.json()) as { id: string }[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].id).toBe("p1");
+});
+
+test("fix: auth provider that throws is treated as anonymous — public reads return 200, not 500", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Published','published')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a2','Draft','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+
+  // Auth provider that always rejects — simulates a broken/unavailable provider.
+  const brokenAuth: AuthProvider = {
+    authenticate() {
+      return Promise.reject(new Error("auth service unavailable"));
+    },
+  };
+
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: brokenAuth },
+  );
+
+  // Public read must succeed (200) — broken auth provider falls back to anonymous.
+  const res = await app.request("/api/articles");
+  expect(res.status).toBe(200);
+  // Only published rows visible (anonymous = PUBLIC_ROLE → draft gate applies).
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id)).toEqual(["a1"]);
+  expect(res.headers.get("X-Total-Count")).toBe("1");
+});
+
+test("fix: POST with status: null defaults to draft, not leaked as null", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // POST with an explicit null status — must be coerced to "draft".
+  const create = await app.request("/api/articles", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "a1", title: "Null-status article", status: null }),
+  });
+  expect(create.status).toBe(201);
+  const created = (await create.json()) as { status: string };
+  expect(created.status).toBe("draft");
+
+  // Public list should not see the row (it is a draft).
+  const pub = await app.request("/api/articles");
+  expect(pub.status).toBe(200);
+  const rows = (await pub.json()) as unknown[];
+  expect(rows).toHaveLength(0);
+  expect(pub.headers.get("X-Total-Count")).toBe("0");
+});
+
+// ── Relations / expand tests (TDD) ───────────────────────────────────────────
+
+test("relations: expand=authorId on single row returns _expanded.authorId", async () => {
+  const authorsTable = sqliteTable("authors", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+  });
+  const postsWithAuthor = sqliteTable("posts_with_author", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(sql`CREATE TABLE authors (id text PRIMARY KEY, name text NOT NULL)`);
+  await ctx.db.run(
+    sql`CREATE TABLE posts_with_author (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await ctx.db.run(sql`INSERT INTO authors VALUES ('a1', 'Alice')`);
+  await ctx.db.run(sql`INSERT INTO posts_with_author VALUES ('p1', 'Hello', 'a1')`);
+
+  const colAuthors = collection(authorsTable, { name: "authors" });
+  const colPosts = collection(postsWithAuthor, {
+    name: "posts_with_author",
+    relations: { authorId: { collection: "authors" } },
+  });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/posts_with_author/p1?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  const row = (await res.json()) as Record<string, unknown>;
+  expect(row.id).toBe("p1");
+  expect(row.authorId).toBe("a1"); // FK field preserved
+  expect(row._expanded).toBeDefined();
+  expect((row._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "a1",
+    name: "Alice",
+  });
+});
+
+test("relations: expand=authorId on list — each row has _expanded; null FK → null", async () => {
+  const authorsTable = sqliteTable("authors", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+  });
+  const postsWithAuthor = sqliteTable("posts_with_author", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(sql`CREATE TABLE authors (id text PRIMARY KEY, name text NOT NULL)`);
+  await ctx.db.run(
+    sql`CREATE TABLE posts_with_author (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await ctx.db.run(sql`INSERT INTO authors VALUES ('a1', 'Alice')`);
+  await ctx.db.run(sql`INSERT INTO posts_with_author VALUES ('p1', 'Hello', 'a1')`);
+  await ctx.db.run(sql`INSERT INTO posts_with_author VALUES ('p2', 'Orphan', NULL)`);
+
+  const colAuthors = collection(authorsTable, { name: "authors" });
+  const colPosts = collection(postsWithAuthor, {
+    name: "posts_with_author",
+    relations: { authorId: { collection: "authors" } },
+  });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/posts_with_author?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as Record<string, unknown>[];
+  expect(rows).toHaveLength(2);
+  const p1 = rows.find((r) => r.id === "p1");
+  const p2 = rows.find((r) => r.id === "p2");
+  expect(p1).toBeDefined();
+  expect(p1!._expanded).toBeDefined();
+  expect((p1!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "a1",
+    name: "Alice",
+  });
+  expect(p2).toBeDefined();
+  expect(p2!._expanded).toBeDefined();
+  expect((p2!._expanded as Record<string, unknown>).authorId).toBeNull();
+});
+
+test("relations: expand=nope (undeclared relation) returns 400", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?expand=nope", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(400);
+});
+
+test("relations: no ?expand → no _expanded key (backward compat)", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const list = await app.request("/api/posts", { headers: { "x-role": "admin" } });
+  expect(list.status).toBe(200);
+  const rows = (await list.json()) as Record<string, unknown>[];
+  expect(rows[0]._expanded).toBeUndefined();
+
+  const single = await app.request("/api/posts/p1", { headers: { "x-role": "admin" } });
+  expect(single.status).toBe(200);
+  const row = (await single.json()) as Record<string, unknown>;
+  expect(row._expanded).toBeUndefined();
+});
+
+// ── Security: draft leak via ?expand ─────────────────────────────────────────
+
+test("security: public caller expanding a draft target row gets null; admin gets the full row", async () => {
+  const authorsTable = sqliteTable("authors_drafts", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    status: text("status").notNull(),
+  });
+  const postsTable = sqliteTable("posts_rel_draft", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE authors_drafts (id text PRIMARY KEY, name text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE posts_rel_draft (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  // Insert a DRAFT author and a published post that references it.
+  await ctx.db.run(sql`INSERT INTO authors_drafts VALUES ('au1', 'Draft Author', 'draft')`);
+  await ctx.db.run(sql`INSERT INTO posts_rel_draft VALUES ('p1', 'Hello', 'au1')`);
+
+  const colAuthors = collection(authorsTable, {
+    name: "authors_drafts",
+    drafts: { column: "status" },
+    public: ["read"] as const,
+  });
+  const colPosts = collection(postsTable, {
+    name: "posts_rel_draft",
+    public: ["read"] as const,
+    relations: { authorId: { collection: "authors_drafts" } },
+  });
+
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller (no x-role) expands authorId — target is a draft → must get null.
+  const pubSingle = await app.request("/api/posts_rel_draft/p1?expand=authorId");
+  expect(pubSingle.status).toBe(200);
+  const pubSingleRow = (await pubSingle.json()) as Record<string, unknown>;
+  expect((pubSingleRow._expanded as Record<string, unknown>).authorId).toBeNull();
+
+  // Public caller on the list endpoint — same guarantee.
+  const pubList = await app.request("/api/posts_rel_draft?expand=authorId");
+  expect(pubList.status).toBe(200);
+  const pubListRows = (await pubList.json()) as Record<string, unknown>[];
+  const p1Pub = pubListRows.find((r) => r.id === "p1");
+  expect(p1Pub).toBeDefined();
+  expect((p1Pub!._expanded as Record<string, unknown>).authorId).toBeNull();
+
+  // Admin caller (x-role: admin) expands the same — gets the full draft row.
+  const admSingle = await app.request("/api/posts_rel_draft/p1?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admSingle.status).toBe(200);
+  const admSingleRow = (await admSingle.json()) as Record<string, unknown>;
+  expect((admSingleRow._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au1",
+    name: "Draft Author",
+    status: "draft",
+  });
+
+  // Admin on list.
+  const admList = await app.request("/api/posts_rel_draft?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admList.status).toBe(200);
+  const admListRows = (await admList.json()) as Record<string, unknown>[];
+  const p1Adm = admListRows.find((r) => r.id === "p1");
+  expect(p1Adm).toBeDefined();
+  expect((p1Adm!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au1",
+    name: "Draft Author",
+    status: "draft",
+  });
+});
+
+// ── Webhooks (ADR-0047) ───────────────────────────────────────────────────────
+
+async function buildWebhookApp(webhookCtx: EnbiDb, deliveries: WebhookDelivery[]) {
+  return createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/a", secret: "s3cret" }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+}
+
+test("webhooks: POST fires a create delivery with correct shape", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const webhookApp = await buildWebhookApp(webhookCtx, deliveries);
+
+  const res = await webhookApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "w1", title: "Webhook test", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.url).toBe("https://hook.test/a");
+  expect(d.payload.event).toBe("create");
+  expect(d.payload.collection).toBe("posts");
+  expect(d.payload.id).toBe("w1");
+  expect((d.payload.data as Record<string, unknown>).id).toBe("w1");
+  expect((d.payload.data as Record<string, unknown>).title).toBe("Webhook test");
+  expect(d.signature).toBeDefined();
+  expect(d.signature!.startsWith("sha256=")).toBe(true);
+});
+
+test("webhooks: PUT fires an update delivery", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await webhookCtx.db.run(sql`INSERT INTO posts VALUES ('w2','Original',0)`);
+
+  const deliveries: WebhookDelivery[] = [];
+  const webhookApp = await buildWebhookApp(webhookCtx, deliveries);
+
+  const res = await webhookApp.request("/api/posts/w2", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Updated", views: 5 }),
+  });
+  expect(res.status).toBe(200);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.payload.event).toBe("update");
+  expect(d.payload.collection).toBe("posts");
+  expect(d.payload.id).toBe("w2");
+});
+
+test("webhooks: DELETE fires a delete delivery with data:{id}", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await webhookCtx.db.run(sql`INSERT INTO posts VALUES ('w3','To delete',0)`);
+
+  const deliveries: WebhookDelivery[] = [];
+  const webhookApp = await buildWebhookApp(webhookCtx, deliveries);
+
+  const res = await webhookApp.request("/api/posts/w3", {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(204);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.payload.event).toBe("delete");
+  expect(d.payload.collection).toBe("posts");
+  expect(d.payload.id).toBe("w3");
+  expect(d.payload.data).toEqual({ id: "w3" });
+});
+
+test("webhooks: event filtering — webhook with events:['delete'] does NOT fire on create", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const filteredApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/delete-only", events: ["delete"] }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await filteredApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wf1", title: "Filter test", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(0);
+
+  // Positive case: a DELETE should fire exactly one delivery with event === "delete".
+  const del = await filteredApp.request("/api/posts/wf1", {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(del.status).toBe(204);
+  expect(deliveries).toHaveLength(1);
+  expect(deliveries[0].payload.event).toBe("delete");
+});
+
+test("webhooks: collection filtering — webhook with collections:['other'] does NOT fire for posts", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const filteredApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/other-only", collections: ["other"] }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await filteredApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wc1", title: "Collection filter", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(0);
+});
+
+test("webhooks: no secret → delivery has no signature", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const noSecretApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/no-secret" }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await noSecretApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wns1", title: "No secret", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(1);
+  expect(deliveries[0].signature).toBeUndefined();
+});
+
+test("webhooks: signature equals independently-computed HMAC-SHA256 of JSON.stringify(payload)", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const secret = "verify-secret";
+  const deliveries: WebhookDelivery[] = [];
+  const verifyApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/verify", secret }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await verifyApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wv1", title: "Verify sig", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.signature).toBeDefined();
+
+  // Independently compute the expected HMAC-SHA256.
+  const expectedHex = createHmac("sha256", secret).update(JSON.stringify(d.payload)).digest("hex");
+  expect(d.signature).toBe(`sha256=${expectedHex}`);
 });

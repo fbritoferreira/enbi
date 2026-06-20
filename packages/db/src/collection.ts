@@ -21,6 +21,19 @@ export type CollectionOptions = {
   permissionsKey?: string;
   /** Actions accessible without authentication (ADR-0019). Defaults to none. */
   public?: PublicAccess;
+  /**
+   * Enable draft/publish for this collection (ADR-0045). When truthy the table
+   * MUST have the named status column (a text column). Public callers only see
+   * rows where that column equals "published"; creates default to "draft".
+   * `true` uses column name "status". An object `{ column: "my_col" }` overrides.
+   */
+  drafts?: boolean | { column?: string };
+  /**
+   * Declare FK relations on this collection. Keys are the JS property name of
+   * the column that holds the target row's primary key; values name the target
+   * collection. Used by the server's `?expand` query parameter.
+   */
+  relations?: Record<string, { collection: string }>;
 };
 
 export type Collection<T extends Table = Table> = {
@@ -32,6 +45,17 @@ export type Collection<T extends Table = Table> = {
   public: PublicAccess;
   /** Property name of the table's single primary-key column. */
   primaryKey: string;
+  /**
+   * Draft/publish configuration. `false` means disabled. When truthy the named
+   * column controls visibility: `"published"` rows are public; all others are
+   * drafts. (ADR-0045)
+   */
+  drafts: { column: string } | false;
+  /**
+   * FK relations declared on this collection. Keys are the JS property name of
+   * the column holding the target row's PK; values name the target collection.
+   */
+  relations: Record<string, { collection: string }>;
 };
 
 export type AnyCollection = Collection;
@@ -55,6 +79,14 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
       `Collection name "${options.name}" must not start with "admin_".`,
     );
   }
+  function normalizeDrafts(
+    raw: boolean | { column?: string } | undefined,
+  ): { column: string } | false {
+    if (!raw) return false;
+    if (raw === true) return { column: "status" };
+    return { column: raw.column ?? "status" };
+  }
+
   return {
     table,
     name: options.name,
@@ -63,6 +95,8 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     permissionsKey: options.permissionsKey ?? options.name,
     public: options.public ?? false,
     primaryKey: resolvePrimaryKey(options.name, table),
+    drafts: normalizeDrafts(options.drafts),
+    relations: options.relations ?? {},
   };
 }
 

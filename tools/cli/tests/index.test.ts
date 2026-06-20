@@ -68,6 +68,7 @@ test("syncSchema pushes the schema so tables exist", async () => {
   expect(names).toContain("posts");
   expect(names).toContain("_revisions");
   expect(names).toContain("_api_keys");
+  expect(names).toContain("_media");
 });
 
 test("dev data path: synced db serves the content API", async () => {
@@ -98,7 +99,7 @@ const cfg = (): EnbiConfig => ({
 
 test("assembleSchema includes content, internal, and auth tables", () => {
   const schema = assembleSchema(cfg(), "sqlite");
-  for (const t of ["posts", "_revisions", "_api_keys", "user", "session"]) {
+  for (const t of ["posts", "_revisions", "_api_keys", "_media", "user", "session"]) {
     expect(schema[t]).toBeDefined();
   }
 });

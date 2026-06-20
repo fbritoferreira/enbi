@@ -45,13 +45,41 @@ export type EnbiAuthConfig = {
   apiKeys?: boolean;
 };
 
+export type WebhookEvent = "create" | "update" | "delete";
+
+export type WebhookPayload = {
+  event: WebhookEvent;
+  collection: string;
+  id: string;
+  data: unknown;
+  timestamp: string;
+};
+
+export type WebhookConfig = {
+  url: string;
+  /** Events that trigger delivery. Defaults to all three. */
+  events?: WebhookEvent[];
+  /** Collection names that trigger delivery. Defaults to all collections. */
+  collections?: string[];
+  /** When set, signs the body with HMAC-SHA256; value sent in X-Enbi-Signature. */
+  secret?: string;
+};
+
 export type EnbiConfig = {
   db: EnbiDbConfig;
   auth: EnbiAuthConfig;
   roles: Record<string, RolePermission>;
   collections: AnyCollection[];
-  /** Admin UI origin allowed to call the API with credentials (CORS). */
-  admin?: { origin?: string };
+  /**
+   * Admin UI origin allowed to call the API with credentials (CORS).
+   * Set `crossSite: true` when the admin is on a different domain than the API
+   * (requires HTTPS) — opts the session cookie into `SameSite=None; Secure`.
+   */
+  admin?: { origin?: string; crossSite?: boolean };
+  /** Local-disk media store configuration (ADR-0044). */
+  media?: { dir?: string };
+  /** Outbound webhook endpoints notified on content mutations (ADR-0047). */
+  webhooks?: WebhookConfig[];
 };
 
 /** Identity helper that gives the user full type-checking on their config. */

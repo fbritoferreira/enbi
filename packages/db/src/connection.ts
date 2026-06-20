@@ -1,6 +1,7 @@
 // @enbi/db — dialect→driver connection factory (ADR-0003, ADR-0018).
 import { drizzle as drizzleLibsql, type LibSQLDatabase } from "drizzle-orm/libsql";
 import { apiKeysFor, type ApiKeysTable } from "./apikeys.ts";
+import { mediaFor, type MediaTable } from "./media.ts";
 import type { EnbiDbConfig, EnbiDialect } from "./config.ts";
 import { EnbiError } from "./errors.ts";
 import { revisionsFor, type RevisionsTable } from "./revisions.ts";
@@ -18,17 +19,19 @@ export type EnbiDb = {
   db: EnbiDatabase;
   revisions: RevisionsTable;
   apiKeys: ApiKeysTable;
+  media: MediaTable;
 };
 
 export async function createDb(config: EnbiDbConfig): Promise<EnbiDb> {
   const revisions = revisionsFor(config.dialect);
   const apiKeys = apiKeysFor(config.dialect);
+  const media = mediaFor(config.dialect);
 
   switch (config.dialect) {
     case "sqlite": {
       const { createClient } = await import("@libsql/client");
       const client = createClient({ url: config.url });
-      return { dialect: "sqlite", db: drizzleLibsql(client), revisions, apiKeys };
+      return { dialect: "sqlite", db: drizzleLibsql(client), revisions, apiKeys, media };
     }
     case "postgres": {
       const { drizzle } = await import("drizzle-orm/node-postgres");
@@ -39,13 +42,20 @@ export async function createDb(config: EnbiDbConfig): Promise<EnbiDb> {
         db: drizzle(pool) as unknown as EnbiDatabase,
         revisions,
         apiKeys,
+        media,
       };
     }
     case "mysql": {
       const { drizzle } = await import("drizzle-orm/mysql2");
       const { createPool } = await import("mysql2/promise");
       const pool = createPool(config.url);
-      return { dialect: "mysql", db: drizzle(pool) as unknown as EnbiDatabase, revisions, apiKeys };
+      return {
+        dialect: "mysql",
+        db: drizzle(pool) as unknown as EnbiDatabase,
+        revisions,
+        apiKeys,
+        media,
+      };
     }
     default:
       throw new EnbiError("config", `Unknown dialect: ${String(config.dialect)}`);

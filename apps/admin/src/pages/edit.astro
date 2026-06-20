@@ -3,6 +3,8 @@ import Admin from "../layouts/Admin.astro";
 ---
 <Admin title="Edit — enbi">
   <h1 id="heading">Entry</h1>
+  <p id="hist-link" hidden><a id="hist-a" href="#">History</a></p>
+  <button id="publish-toggle" hidden></button>
   <form id="form"></form>
   <button id="del" hidden>Delete</button>
   <p class="error" id="err" hidden></p>
@@ -16,6 +18,13 @@ import Admin from "../layouts/Admin.astro";
     const heading = document.getElementById("heading");
     if (heading) heading.textContent = isNew ? `New ${name}` : `Edit ${name}/${id}`;
 
+    const histLink = document.getElementById("hist-link");
+    const histA = document.getElementById("hist-a") as HTMLAnchorElement | null;
+    if (!isNew && histLink && histA) {
+      histLink.hidden = false;
+      histA.href = `/revisions?c=${encodeURIComponent(name)}&id=${encodeURIComponent(id)}`;
+    }
+
     const form = document.getElementById("form") as HTMLFormElement | null;
     const errEl = document.getElementById("err");
 
@@ -25,7 +34,13 @@ import Admin from "../layouts/Admin.astro";
 
     const metaRes = await enbiFetch("/api/admin_collections");
     if (metaRes.status !== 401) {
-      type ColMeta = { name: string; primaryKey: string; columns: { name: string }[] };
+      type ColMeta = {
+        name: string;
+        primaryKey: string;
+        columns: { name: string; type: string }[];
+        drafts: { column: string } | false;
+        relations: Record<string, { collection: string }>;
+      };
       const meta = (await metaRes.json()) as ColMeta[];
       const col = meta.find((m) => m.name === name);
 
@@ -38,12 +53,36 @@ import Admin from "../layouts/Admin.astro";
           if (r.ok) current = await r.json() as Record<string, unknown>;
         }
 
-        form.innerHTML = col.columns
-          .map(
-            (c) =>
-              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${!isNew && c.name === col.primaryKey ? "readonly" : ""} />`,
-          )
-          .join("") + `<button type="submit">Save</button>`;
+        const parts: string[] = [];
+        for (const c of col.columns) {
+          const isRelation = Boolean(col.relations[c.name]);
+          const isPk = c.name === col.primaryKey;
+          if (isRelation && !isPk) {
+            const targetName = col.relations[c.name].collection;
+            let opts = `<option value="">-- none --</option>`;
+            try {
+              const tr = await enbiFetch(`/api/${encodeURIComponent(targetName)}?limit=100`);
+              if (tr.ok) {
+                const entries = (await tr.json()) as Record<string, unknown>[];
+                const pkField = meta.find((m) => m.name === targetName)?.primaryKey ?? Object.keys(entries[0] ?? {})[0];
+                for (const entry of entries) {
+                  const idVal = escapeHtml(String(entry[pkField] ?? ""));
+                  const labelVal = escapeHtml(String((entry as Record<string, unknown>).title ?? Object.values(entry as Record<string, unknown>)[0] ?? ""));
+                  const sel = String(current[c.name] ?? "") === String(entry[pkField] ?? "") ? " selected" : "";
+                  opts += `<option value="${idVal}"${sel}>${labelVal}</option>`;
+                }
+              }
+            } catch { /* leave as empty select on network error */ }
+            parts.push(
+              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><select id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}">${opts}</select>`,
+            );
+          } else {
+            parts.push(
+              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${isPk && !isNew ? "readonly" : ""} />`,
+            );
+          }
+        }
+        form.innerHTML = parts.join("") + `<button type="submit">Save</button>`;
 
         form.addEventListener("submit", async (e) => {
           e.preventDefault();
@@ -61,6 +100,33 @@ import Admin from "../layouts/Admin.astro";
             showErr(`Save failed (${res.status}).`);
           }
         });
+
+        // Publish/Unpublish toggle — only shown for drafts-enabled collections when editing.
+        const toggleBtn = document.getElementById("publish-toggle") as HTMLButtonElement | null;
+        if (!isNew && col.drafts && toggleBtn) {
+          const statusCol = col.drafts.column;
+          const currentStatus = String(current[statusCol] ?? "draft");
+          const isPublished = currentStatus === "published";
+          toggleBtn.hidden = false;
+          toggleBtn.textContent = isPublished ? "Unpublish" : "Publish";
+          toggleBtn.addEventListener("click", async () => {
+            const nextStatus = isPublished ? "draft" : "published";
+            const body: Record<string, string> = {};
+            for (const c of col.columns) {
+              const input = document.getElementById(`f_${c.name}`) as HTMLInputElement | null;
+              body[c.name] = c.name === statusCol ? nextStatus : (input ? input.value : String(current[c.name] ?? ""));
+            }
+            const res = await enbiFetch(`/api/${name}/${encodeURIComponent(id)}`, {
+              method: "PUT",
+              body: JSON.stringify(body),
+            });
+            if (res.ok) {
+              location.href = `/entries?c=${encodeURIComponent(name)}`;
+            } else {
+              showErr(`Status update failed (${res.status}).`);
+            }
+          });
+        }
 
         const del = document.getElementById("del") as HTMLButtonElement | null;
         if (!isNew && del) {
