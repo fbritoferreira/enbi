@@ -27,6 +27,8 @@ type CollectionMeta = {
   locales: string[];
   /** Default locale (ADR-0050). Null if i18n not configured. */
   defaultLocale: string | null;
+  /** Admin editor widget overrides: maps field name → widget type (e.g. "wysiwyg"). Empty object = none. */
+  widgets: Record<string, string>;
 };
 
 function metaOf(col: AnyCollection, i18n?: EnbiConfig["i18n"]): CollectionMeta {
@@ -46,6 +48,7 @@ function metaOf(col: AnyCollection, i18n?: EnbiConfig["i18n"]): CollectionMeta {
     localized: col.localized,
     locales: i18n?.locales ?? [],
     defaultLocale: i18n?.defaultLocale ?? null,
+    widgets: col.widgets,
   };
 }
 
