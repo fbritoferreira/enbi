@@ -56,6 +56,33 @@ async function snapshot(ctx: EnbiDb, col: AnyCollection, entryId: string, caller
   }
 }
 
+/**
+ * Resolve a single expanded relation field value for `row`, applying the
+ * target collection's draft gate so public callers never see draft rows
+ * via expansion (ADR-0045).
+ */
+async function resolveExpanded(
+  ctx: EnbiDb,
+  targetCol: AnyCollection,
+  fkValue: unknown,
+  callerRole: string,
+): Promise<Row | null> {
+  if (fkValue == null || fkValue === "") return null;
+  const expanded = await getRow(ctx.db, targetCol.table, targetCol.primaryKey, fkValue as string);
+  if (!expanded) return null;
+  // Draft gate: if the target collection has drafts enabled and the caller is
+  // public, hide any non-published target row (return null) so draft rows
+  // cannot be leaked via the expand path (ADR-0045).
+  if (
+    targetCol.drafts &&
+    callerRole === PUBLIC_ROLE &&
+    expanded[targetCol.drafts.column] !== "published"
+  ) {
+    return null;
+  }
+  return expanded;
+}
+
 function mountCollection(
   app: Hono,
   ctx: EnbiDb,
@@ -158,19 +185,10 @@ function mountCollection(
           }
           for (const row of rows) {
             const r = row as Row;
-            const fkValue = r[field];
-            let expanded: Row | undefined;
-            if (fkValue != null && fkValue !== "") {
-              expanded = await getRow(
-                ctx.db,
-                targetCol.table,
-                targetCol.primaryKey,
-                fkValue as string,
-              );
-            }
+            const expanded = await resolveExpanded(ctx, targetCol, r[field], caller.role);
             (r as Record<string, unknown>)._expanded = {
               ...((r as Record<string, unknown>)._expanded as object | undefined),
-              [field]: expanded ?? null,
+              [field]: expanded,
             };
           }
         }
@@ -232,19 +250,10 @@ function mountCollection(
               `Relation target collection "${col.relations[field].collection}" is not registered.`,
             );
           }
-          const fkValue = row[field];
-          let expanded: Row | undefined;
-          if (fkValue != null && fkValue !== "") {
-            expanded = await getRow(
-              ctx.db,
-              targetCol.table,
-              targetCol.primaryKey,
-              fkValue as string,
-            );
-          }
+          const expanded = await resolveExpanded(ctx, targetCol, row[field], caller.role);
           (row as Record<string, unknown>)._expanded = {
             ...((row as Record<string, unknown>)._expanded as object | undefined),
-            [field]: expanded ?? null,
+            [field]: expanded,
           };
         }
       } catch (err) {

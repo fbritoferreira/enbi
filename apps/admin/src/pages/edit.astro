@@ -64,10 +64,11 @@ import Admin from "../layouts/Admin.astro";
               const tr = await enbiFetch(`/api/${encodeURIComponent(targetName)}?limit=100`);
               if (tr.ok) {
                 const entries = (await tr.json()) as Record<string, unknown>[];
+                const pkField = meta.find((m) => m.name === targetName)?.primaryKey ?? Object.keys(entries[0] ?? {})[0];
                 for (const entry of entries) {
-                  const idVal = escapeHtml(String(entry[Object.keys(entry)[0]] ?? ""));
+                  const idVal = escapeHtml(String(entry[pkField] ?? ""));
                   const labelVal = escapeHtml(String((entry as Record<string, unknown>).title ?? Object.values(entry as Record<string, unknown>)[0] ?? ""));
-                  const sel = String(current[c.name] ?? "") === String(entry[Object.keys(entry)[0]] ?? "") ? " selected" : "";
+                  const sel = String(current[c.name] ?? "") === String(entry[pkField] ?? "") ? " selected" : "";
                   opts += `<option value="${idVal}"${sel}>${labelVal}</option>`;
                 }
               }
