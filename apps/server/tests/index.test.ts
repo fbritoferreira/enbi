@@ -1297,3 +1297,97 @@ test("relations: no ?expand → no _expanded key (backward compat)", async () =>
   const row = (await single.json()) as Record<string, unknown>;
   expect(row._expanded).toBeUndefined();
 });
+
+// ── Security: draft leak via ?expand ─────────────────────────────────────────
+
+test("security: public caller expanding a draft target row gets null; admin gets the full row", async () => {
+  const authorsTable = sqliteTable("authors_drafts", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    status: text("status").notNull(),
+  });
+  const postsTable = sqliteTable("posts_rel_draft", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE authors_drafts (id text PRIMARY KEY, name text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE posts_rel_draft (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  // Insert a DRAFT author and a published post that references it.
+  await ctx.db.run(sql`INSERT INTO authors_drafts VALUES ('au1', 'Draft Author', 'draft')`);
+  await ctx.db.run(sql`INSERT INTO posts_rel_draft VALUES ('p1', 'Hello', 'au1')`);
+
+  const colAuthors = collection(authorsTable, {
+    name: "authors_drafts",
+    drafts: { column: "status" },
+    public: ["read"] as const,
+  });
+  const colPosts = collection(postsTable, {
+    name: "posts_rel_draft",
+    public: ["read"] as const,
+    relations: { authorId: { collection: "authors_drafts" } },
+  });
+
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller (no x-role) expands authorId — target is a draft → must get null.
+  const pubSingle = await app.request("/api/posts_rel_draft/p1?expand=authorId");
+  expect(pubSingle.status).toBe(200);
+  const pubSingleRow = (await pubSingle.json()) as Record<string, unknown>;
+  expect((pubSingleRow._expanded as Record<string, unknown>).authorId).toBeNull();
+
+  // Public caller on the list endpoint — same guarantee.
+  const pubList = await app.request("/api/posts_rel_draft?expand=authorId");
+  expect(pubList.status).toBe(200);
+  const pubListRows = (await pubList.json()) as Record<string, unknown>[];
+  const p1Pub = pubListRows.find((r) => r.id === "p1");
+  expect(p1Pub).toBeDefined();
+  expect((p1Pub!._expanded as Record<string, unknown>).authorId).toBeNull();
+
+  // Admin caller (x-role: admin) expands the same — gets the full draft row.
+  const admSingle = await app.request("/api/posts_rel_draft/p1?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admSingle.status).toBe(200);
+  const admSingleRow = (await admSingle.json()) as Record<string, unknown>;
+  expect((admSingleRow._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au1",
+    name: "Draft Author",
+    status: "draft",
+  });
+
+  // Admin on list.
+  const admList = await app.request("/api/posts_rel_draft?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admList.status).toBe(200);
+  const admListRows = (await admList.json()) as Record<string, unknown>[];
+  const p1Adm = admListRows.find((r) => r.id === "p1");
+  expect(p1Adm).toBeDefined();
+  expect((p1Adm!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au1",
+    name: "Draft Author",
+    status: "draft",
+  });
+});

@@ -17,7 +17,7 @@ type CollectionMeta = {
   columns: ColumnMeta[];
   /** Draft/publish configuration. `false` means disabled. (ADR-0045) */
   drafts: { column: string } | false;
-  /** FK relations declared on this collection. (ADR-0032) */
+  /** FK relations declared on this collection. (ADR-0046) */
   relations: Record<string, { collection: string }>;
 };
 
