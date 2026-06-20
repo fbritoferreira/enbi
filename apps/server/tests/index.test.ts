@@ -762,7 +762,10 @@ test("media: roundtrip — upload, list, serve, delete", async () => {
   const serve = await app.request(`/api/media/${id}`);
   expect(serve.status).toBe(200);
   expect(serve.headers.get("content-type")).toBe("text/plain");
-  expect(await serve.text()).toBe("hello world");
+  // Exact-bytes check: must equal uploaded payload precisely (not Buffer pool garbage)
+  const buf = new Uint8Array(await serve.arrayBuffer());
+  expect(buf.byteLength).toBe(11); // "hello world".length === 11
+  expect(new TextDecoder().decode(buf)).toBe("hello world");
 
   // Delete
   const del = await app.request(`/api/admin_media/${id}`, {

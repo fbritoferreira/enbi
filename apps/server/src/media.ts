@@ -101,6 +101,6 @@ export function mountMedia(
     if (rows.length === 0) throw new EnbiError("not_found", "Media not found.");
     const row = rows[0]!;
     const bytes = await store.get(id);
-    return c.body(bytes.buffer as ArrayBuffer, 200, { "Content-Type": row.mime });
+    return c.body(new Uint8Array(bytes), 200, { "Content-Type": row.mime });
   });
 }
