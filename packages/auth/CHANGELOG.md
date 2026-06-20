@@ -1,5 +1,16 @@
 # @enbi/auth
 
+## 0.7.0
+
+### Minor Changes
+
+- [#30](https://github.com/fbritoferreira/enbi/pull/30) [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add `admin.crossSite` config flag: when true, the session cookie is issued as `SameSite=None; Secure` so it is sent on cross-origin fetches from an admin on a different domain. Requires HTTPS. The same-site/different-port setup (Lax + CORS + trustedOrigins) is unaffected.
+
+### Patch Changes
+
+- Updated dependencies [[`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5)]:
+  - @enbi/db@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes
