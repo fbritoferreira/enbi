@@ -21,9 +21,15 @@ type CollectionMeta = {
   relations: Record<string, { collection: string }>;
   /** Per-field validation rules for this collection. (ADR-0049) */
   validate: Record<string, FieldRule>;
+  /** Names of translatable fields (ADR-0050). Empty array = none. */
+  localized: string[];
+  /** Configured i18n locales (ADR-0050). Same on every entry; empty if i18n not configured. */
+  locales: string[];
+  /** Default locale (ADR-0050). Null if i18n not configured. */
+  defaultLocale: string | null;
 };
 
-function metaOf(col: AnyCollection): CollectionMeta {
+function metaOf(col: AnyCollection, i18n?: EnbiConfig["i18n"]): CollectionMeta {
   const columns = Object.entries(getTableColumns(col.table)).map(([name, c]) => ({
     name,
     type: (c as { dataType?: string }).dataType ?? "unknown",
@@ -37,6 +43,9 @@ function metaOf(col: AnyCollection): CollectionMeta {
     drafts: col.drafts,
     relations: col.relations,
     validate: col.validate,
+    localized: col.localized,
+    locales: i18n?.locales ?? [],
+    defaultLocale: i18n?.defaultLocale ?? null,
   };
 }
 
@@ -45,9 +54,10 @@ export function mountCollectionsMeta(
   roles: EnbiConfig["roles"],
   auth: AuthProvider,
   collections: AnyCollection[],
+  i18n?: EnbiConfig["i18n"],
 ): void {
   app.get("/api/admin_collections", async (c) => {
     await authorizeResource(auth, roles, RESOURCE, "read", c.req.raw.headers, OPTS);
-    return c.json(collections.map(metaOf));
+    return c.json(collections.map((col) => metaOf(col, i18n)));
   });
 }

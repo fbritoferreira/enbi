@@ -66,6 +66,11 @@ export type CollectionOptions = {
    * Defaults to {} (no validation).
    */
   validate?: Record<string, FieldRule>;
+  /**
+   * Names of fields/columns whose values can be translated per locale (ADR-0050).
+   * Defaults to [] (no fields are translatable).
+   */
+  localized?: string[];
 };
 
 export type Collection<T extends Table = Table> = {
@@ -93,6 +98,11 @@ export type Collection<T extends Table = Table> = {
    * Defaults to {} (no validation).
    */
   validate: Record<string, FieldRule>;
+  /**
+   * Names of fields whose values can be overridden per locale (ADR-0050).
+   * Defaults to [].
+   */
+  localized: string[];
 };
 
 export type AnyCollection = Collection;
@@ -135,6 +145,7 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     drafts: normalizeDrafts(options.drafts),
     relations: options.relations ?? {},
     validate: options.validate ?? {},
+    localized: options.localized ?? [],
   };
 }
 

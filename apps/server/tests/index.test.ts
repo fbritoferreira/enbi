@@ -10,6 +10,7 @@ import {
   hashApiKey,
 } from "@enbi/auth";
 import { collection, createDb, defineEnbiConfig, type EnbiDb } from "@enbi/db";
+import { overlayTranslations, readTranslations, writeTranslations } from "../src/i18n.ts";
 import { validateFields } from "../src/validate.ts";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -676,14 +677,19 @@ test("GET /api/admin_collections returns metadata, admin-only", async () => {
   );
   const ok = await app.request("/api/admin_collections", { headers: { "x-role": "admin" } });
   expect(ok.status).toBe(200);
-  const meta = (await ok.json()) as {
+  const payload = (await ok.json()) as {
     name: string;
     primaryKey: string;
     columns: { name: string }[];
+    locales: string[];
+    defaultLocale: string | null;
   }[];
-  const posts0 = meta.find((m) => m.name === "posts");
+  expect(Array.isArray(payload)).toBe(true);
+  const posts0 = payload.find((m) => m.name === "posts");
   expect(posts0?.primaryKey).toBe("id");
   expect(posts0?.columns.map((col) => col.name).sort()).toEqual(["id", "title", "views"]);
+  expect(posts0?.locales).toEqual([]);
+  expect(posts0?.defaultLocale).toBeNull();
 
   // viewer (read shorthand) is NOT admin → 403
   const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
@@ -2083,4 +2089,316 @@ test("fix: boolean value with min/max rule is not treated as numeric", () => {
   );
   // The boolean should not be treated as a number → no min/max errors produced.
   expect(errors).toHaveLength(0);
+});
+
+test("collection(): localized defaults to []", () => {
+  const t = sqliteTable("tmp_loc", { id: text("id").primaryKey() });
+  const col = collection(t, { name: "tmp_loc" });
+  expect(col.localized).toEqual([]);
+});
+
+test("collection(): localized is set when provided", () => {
+  const t = sqliteTable("tmp_loc2", { id: text("id").primaryKey(), title: text("title") });
+  const col = collection(t, { name: "tmp_loc2", localized: ["title"] });
+  expect(col.localized).toEqual(["title"]);
+});
+
+// ── i18n helpers ──────────────────────────────────────────────────────────
+
+async function buildI18nCtx() {
+  const c = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await c.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY,
+    collection text NOT NULL,
+    entry_id text NOT NULL,
+    locale text NOT NULL,
+    field text NOT NULL,
+    value text
+  )`);
+  return c;
+}
+
+test("readTranslations: returns empty object when no rows exist", async () => {
+  const c = await buildI18nCtx();
+  const result = await readTranslations(c.db, c.translations, "posts", "p1", "fr");
+  expect(result).toEqual({});
+});
+
+test("writeTranslations + readTranslations: round-trip", async () => {
+  const c = await buildI18nCtx();
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Bonjour" });
+  const result = await readTranslations(c.db, c.translations, "posts", "p1", "fr");
+  expect(result).toEqual({ title: "Bonjour" });
+});
+
+test("writeTranslations: upsert replaces existing value", async () => {
+  const c = await buildI18nCtx();
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Bonjour" });
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Salut" });
+  const result = await readTranslations(c.db, c.translations, "posts", "p1", "fr");
+  expect(result.title).toBe("Salut");
+});
+
+test("overlayTranslations: overlays translated fields on rows", async () => {
+  const c = await buildI18nCtx();
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Bonjour" });
+  const rows = [{ id: "p1", title: "Hello", body: "World" }];
+  const overlaid = await overlayTranslations(c.db, c.translations, rows, "posts", "fr", [
+    "title",
+    "body",
+  ]);
+  expect(overlaid[0]).toMatchObject({ id: "p1", title: "Bonjour", body: "World" });
+});
+
+test("overlayTranslations: falls back to base value when no translation", async () => {
+  const c = await buildI18nCtx();
+  const rows = [{ id: "p1", title: "Hello", body: "World" }];
+  const overlaid = await overlayTranslations(c.db, c.translations, rows, "posts", "de", [
+    "title",
+    "body",
+  ]);
+  expect(overlaid[0]).toMatchObject({ title: "Hello", body: "World" });
+});
+
+// ── i18n / translations routes ────────────────────────────────────────────
+const localizedPosts = sqliteTable("localized_posts", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+});
+
+async function buildI18nApp() {
+  const i18nCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await i18nCtx.db.run(
+    sql`CREATE TABLE localized_posts (id text PRIMARY KEY, title text NOT NULL, body text NOT NULL)`,
+  );
+  await i18nCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    locale text NOT NULL, field text NOT NULL, value text)`);
+
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*", viewer: "read" },
+    collections: [
+      collection(localizedPosts, {
+        name: "localized_posts",
+        localized: ["title", "body"],
+      }),
+    ],
+    i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+  });
+
+  const authProvider = composeProviders(apiKeyProvider(i18nCtx.db, i18nCtx.apiKeys), stubAuth);
+  const i18nApp = await createServer(config, { db: i18nCtx, authProvider });
+  return { i18nApp, i18nCtx };
+}
+
+test("i18n: PUT translations/fr stores field translations; GET translations/fr returns them", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+
+  const put = await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+  expect(put.status).toBe(200);
+
+  const get = await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(get.status).toBe(200);
+  const data = (await get.json()) as Record<string, string>;
+  expect(data.title).toBe("Bonjour");
+  expect(data.body).toBeUndefined();
+});
+
+test("i18n: GET /:id?locale=fr overlays title but falls back to base body", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+
+  const res = await i18nApp.request("/api/localized_posts/p1?locale=fr", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(res.status).toBe(200);
+  const row = (await res.json()) as Record<string, string>;
+  expect(row.title).toBe("Bonjour"); // translated
+  expect(row.body).toBe("World"); // fallback
+});
+
+test("i18n: GET /:id with no locale returns base values unchanged", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+
+  const res = await i18nApp.request("/api/localized_posts/p1", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(res.status).toBe(200);
+  const row = (await res.json()) as Record<string, string>;
+  expect(row.title).toBe("Hello");
+  expect(row.body).toBe("World");
+});
+
+test("i18n: GET list ?locale=fr overlays rows", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+
+  const res = await i18nApp.request("/api/localized_posts?locale=fr", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as Record<string, string>[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].title).toBe("Bonjour");
+  expect(rows[0].body).toBe("World");
+});
+
+test("i18n: ?locale=zz (unknown locale) → 400", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  const listRes = await i18nApp.request("/api/localized_posts?locale=zz", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(listRes.status).toBe(400);
+
+  const getRes = await i18nApp.request("/api/localized_posts/p1?locale=zz", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(getRes.status).toBe(400);
+});
+
+test("i18n: PUT translations for non-localized field → 422", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  const res = await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p1" }),
+  });
+  expect(res.status).toBe(422);
+});
+
+test("i18n: PUT translations for unconfigured locale → 400", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  const res = await i18nApp.request("/api/localized_posts/p1/translations/de", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Hallo" }),
+  });
+  expect(res.status).toBe(400);
+});
+
+// ── Security: draft-leak via translations read endpoint ───────────────────────
+
+const draftLocalizedPosts = sqliteTable("draft_localized_posts", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: text("status").notNull(),
+});
+
+async function buildDraftI18nApp() {
+  const dlCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await dlCtx.db.run(
+    sql`CREATE TABLE draft_localized_posts (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await dlCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await dlCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await dlCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  await dlCtx.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    locale text NOT NULL, field text NOT NULL, value text)`);
+
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" },
+    collections: [
+      collection(draftLocalizedPosts, {
+        name: "draft_localized_posts",
+        drafts: { column: "status" },
+        localized: ["title"],
+        public: ["read"] as const,
+      }),
+    ],
+    i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+  });
+
+  const authProvider = composeProviders(apiKeyProvider(dlCtx.db, dlCtx.apiKeys), stubAuth);
+  const dlApp = await createServer(config, { db: dlCtx, authProvider });
+  return { dlApp, dlCtx };
+}
+
+test("security: GET translations/:locale of a DRAFT entry returns 404 to public; admin gets 200 with data", async () => {
+  const { dlApp, dlCtx } = await buildDraftI18nApp();
+
+  // Insert a DRAFT entry.
+  await dlCtx.db.run(
+    sql`INSERT INTO draft_localized_posts (id, title, status) VALUES ('d1', 'Draft title', 'draft')`,
+  );
+
+  // Set a French translation as admin so there IS data to potentially leak.
+  const put = await dlApp.request("/api/draft_localized_posts/d1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Titre brouillon" }),
+  });
+  expect(put.status).toBe(200);
+
+  // Public caller (no x-role) → must get 404, not the translations.
+  const pubGet = await dlApp.request("/api/draft_localized_posts/d1/translations/fr");
+  expect(pubGet.status).toBe(404);
+
+  // Admin caller (x-role: admin) → 200 with the stored translation.
+  const admGet = await dlApp.request("/api/draft_localized_posts/d1/translations/fr", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admGet.status).toBe(200);
+  const data = (await admGet.json()) as Record<string, string>;
+  expect(data.title).toBe("Titre brouillon");
 });

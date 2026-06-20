@@ -99,7 +99,15 @@ const cfg = (): EnbiConfig => ({
 
 test("assembleSchema includes content, internal, and auth tables", () => {
   const schema = assembleSchema(cfg(), "sqlite");
-  for (const t of ["posts", "_revisions", "_api_keys", "_media", "user", "session"]) {
+  for (const t of [
+    "posts",
+    "_revisions",
+    "_api_keys",
+    "_media",
+    "_translations",
+    "user",
+    "session",
+  ]) {
     expect(schema[t]).toBeDefined();
   }
 });

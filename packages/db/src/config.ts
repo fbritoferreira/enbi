@@ -80,6 +80,8 @@ export type EnbiConfig = {
   media?: { dir?: string };
   /** Outbound webhook endpoints notified on content mutations (ADR-0047). */
   webhooks?: WebhookConfig[];
+  /** Field-level i18n configuration (ADR-0050). */
+  i18n?: { locales: string[]; defaultLocale?: string };
 };
 
 /** Identity helper that gives the user full type-checking on their config. */

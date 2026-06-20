@@ -1,6 +1,7 @@
 // @enbi/db — aggregate user collections + `_revisions` + auth tables for migrations.
 import { apiKeysFor } from "./apikeys.ts";
 import { mediaFor } from "./media.ts";
+import { translationsFor } from "./translations.ts";
 import type { AnyCollection } from "./collection.ts";
 import type { EnbiDialect } from "./config.ts";
 import { revisionsFor } from "./revisions.ts";
@@ -19,6 +20,7 @@ export function buildSchema(
     _revisions: revisionsFor(dialect),
     _api_keys: apiKeysFor(dialect),
     _media: mediaFor(dialect),
+    _translations: translationsFor(dialect),
   };
   for (const entry of collections) {
     schema[entry.name] = entry.table;

@@ -38,4 +38,11 @@ export {
   sqliteRevisions,
 } from "./revisions.ts";
 export { mediaFor, type MediaTable, mysqlMedia, pgMedia, sqliteMedia } from "./media.ts";
+export {
+  mysqlTranslations,
+  pgTranslations,
+  sqliteTranslations,
+  translationsFor,
+  type TranslationsTable,
+} from "./translations.ts";
 export { buildSchema } from "./schema.ts";
