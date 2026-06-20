@@ -1126,3 +1126,174 @@ test("fix: POST with status: null defaults to draft, not leaked as null", async 
   expect(rows).toHaveLength(0);
   expect(pub.headers.get("X-Total-Count")).toBe("0");
 });
+
+// ── Relations / expand tests (TDD) ───────────────────────────────────────────
+
+test("relations: expand=authorId on single row returns _expanded.authorId", async () => {
+  const authorsTable = sqliteTable("authors", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+  });
+  const postsWithAuthor = sqliteTable("posts_with_author", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(sql`CREATE TABLE authors (id text PRIMARY KEY, name text NOT NULL)`);
+  await ctx.db.run(
+    sql`CREATE TABLE posts_with_author (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await ctx.db.run(sql`INSERT INTO authors VALUES ('a1', 'Alice')`);
+  await ctx.db.run(sql`INSERT INTO posts_with_author VALUES ('p1', 'Hello', 'a1')`);
+
+  const colAuthors = collection(authorsTable, { name: "authors" });
+  const colPosts = collection(postsWithAuthor, {
+    name: "posts_with_author",
+    relations: { authorId: { collection: "authors" } },
+  });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/posts_with_author/p1?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  const row = (await res.json()) as Record<string, unknown>;
+  expect(row.id).toBe("p1");
+  expect(row.authorId).toBe("a1"); // FK field preserved
+  expect(row._expanded).toBeDefined();
+  expect((row._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "a1",
+    name: "Alice",
+  });
+});
+
+test("relations: expand=authorId on list — each row has _expanded; null FK → null", async () => {
+  const authorsTable = sqliteTable("authors", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+  });
+  const postsWithAuthor = sqliteTable("posts_with_author", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(sql`CREATE TABLE authors (id text PRIMARY KEY, name text NOT NULL)`);
+  await ctx.db.run(
+    sql`CREATE TABLE posts_with_author (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await ctx.db.run(sql`INSERT INTO authors VALUES ('a1', 'Alice')`);
+  await ctx.db.run(sql`INSERT INTO posts_with_author VALUES ('p1', 'Hello', 'a1')`);
+  await ctx.db.run(sql`INSERT INTO posts_with_author VALUES ('p2', 'Orphan', NULL)`);
+
+  const colAuthors = collection(authorsTable, { name: "authors" });
+  const colPosts = collection(postsWithAuthor, {
+    name: "posts_with_author",
+    relations: { authorId: { collection: "authors" } },
+  });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/posts_with_author?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as Record<string, unknown>[];
+  expect(rows).toHaveLength(2);
+  const p1 = rows.find((r) => r.id === "p1");
+  const p2 = rows.find((r) => r.id === "p2");
+  expect(p1).toBeDefined();
+  expect(p1!._expanded).toBeDefined();
+  expect((p1!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "a1",
+    name: "Alice",
+  });
+  expect(p2).toBeDefined();
+  expect(p2!._expanded).toBeDefined();
+  expect((p2!._expanded as Record<string, unknown>).authorId).toBeNull();
+});
+
+test("relations: expand=nope (undeclared relation) returns 400", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?expand=nope", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(400);
+});
+
+test("relations: no ?expand → no _expanded key (backward compat)", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const list = await app.request("/api/posts", { headers: { "x-role": "admin" } });
+  expect(list.status).toBe(200);
+  const rows = (await list.json()) as Record<string, unknown>[];
+  expect(rows[0]._expanded).toBeUndefined();
+
+  const single = await app.request("/api/posts/p1", { headers: { "x-role": "admin" } });
+  expect(single.status).toBe(200);
+  const row = (await single.json()) as Record<string, unknown>;
+  expect(row._expanded).toBeUndefined();
+});
