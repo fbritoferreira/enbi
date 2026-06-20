@@ -677,14 +677,20 @@ test("GET /api/admin_collections returns metadata, admin-only", async () => {
   );
   const ok = await app.request("/api/admin_collections", { headers: { "x-role": "admin" } });
   expect(ok.status).toBe(200);
-  const meta = (await ok.json()) as {
-    name: string;
-    primaryKey: string;
-    columns: { name: string }[];
-  }[];
-  const posts0 = meta.find((m) => m.name === "posts");
+  const payload = (await ok.json()) as {
+    collections: {
+      name: string;
+      primaryKey: string;
+      columns: { name: string }[];
+    }[];
+    locales: string[];
+    defaultLocale: string | undefined;
+  };
+  const posts0 = payload.collections.find((m) => m.name === "posts");
   expect(posts0?.primaryKey).toBe("id");
   expect(posts0?.columns.map((col) => col.name).sort()).toEqual(["id", "title", "views"]);
+  expect(payload.locales).toEqual([]);
+  expect(payload.defaultLocale).toBeUndefined();
 
   // viewer (read shorthand) is NOT admin → 403
   const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
@@ -2153,4 +2159,172 @@ test("overlayTranslations: falls back to base value when no translation", async 
     "body",
   ]);
   expect(overlaid[0]).toMatchObject({ title: "Hello", body: "World" });
+});
+
+// ── i18n / translations routes ────────────────────────────────────────────
+const localizedPosts = sqliteTable("localized_posts", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+});
+
+async function buildI18nApp() {
+  const i18nCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await i18nCtx.db.run(
+    sql`CREATE TABLE localized_posts (id text PRIMARY KEY, title text NOT NULL, body text NOT NULL)`,
+  );
+  await i18nCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    locale text NOT NULL, field text NOT NULL, value text)`);
+
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*", viewer: "read" },
+    collections: [
+      collection(localizedPosts, {
+        name: "localized_posts",
+        localized: ["title", "body"],
+      }),
+    ],
+    i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+  });
+
+  const authProvider = composeProviders(apiKeyProvider(i18nCtx.db, i18nCtx.apiKeys), stubAuth);
+  const i18nApp = await createServer(config, { db: i18nCtx, authProvider });
+  return { i18nApp, i18nCtx };
+}
+
+test("i18n: PUT translations/fr stores field translations; GET translations/fr returns them", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+
+  const put = await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+  expect(put.status).toBe(200);
+
+  const get = await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(get.status).toBe(200);
+  const data = (await get.json()) as Record<string, string>;
+  expect(data.title).toBe("Bonjour");
+  expect(data.body).toBeUndefined();
+});
+
+test("i18n: GET /:id?locale=fr overlays title but falls back to base body", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+
+  const res = await i18nApp.request("/api/localized_posts/p1?locale=fr", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(res.status).toBe(200);
+  const row = (await res.json()) as Record<string, string>;
+  expect(row.title).toBe("Bonjour"); // translated
+  expect(row.body).toBe("World"); // fallback
+});
+
+test("i18n: GET /:id with no locale returns base values unchanged", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+
+  const res = await i18nApp.request("/api/localized_posts/p1", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(res.status).toBe(200);
+  const row = (await res.json()) as Record<string, string>;
+  expect(row.title).toBe("Hello");
+  expect(row.body).toBe("World");
+});
+
+test("i18n: GET list ?locale=fr overlays rows", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Bonjour" }),
+  });
+
+  const res = await i18nApp.request("/api/localized_posts?locale=fr", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as Record<string, string>[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].title).toBe("Bonjour");
+  expect(rows[0].body).toBe("World");
+});
+
+test("i18n: ?locale=zz (unknown locale) → 400", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  const listRes = await i18nApp.request("/api/localized_posts?locale=zz", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(listRes.status).toBe(400);
+
+  const getRes = await i18nApp.request("/api/localized_posts/p1?locale=zz", {
+    headers: { "x-role": "viewer" },
+  });
+  expect(getRes.status).toBe(400);
+});
+
+test("i18n: PUT translations for non-localized field → 422", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  const res = await i18nApp.request("/api/localized_posts/p1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p1" }),
+  });
+  expect(res.status).toBe(422);
+});
+
+test("i18n: PUT translations for unconfigured locale → 400", async () => {
+  const { i18nApp, i18nCtx } = await buildI18nApp();
+  await i18nCtx.db.run(
+    sql`INSERT INTO localized_posts (id, title, body) VALUES ('p1', 'Hello', 'World')`,
+  );
+  const res = await i18nApp.request("/api/localized_posts/p1/translations/de", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Hallo" }),
+  });
+  expect(res.status).toBe(400);
 });

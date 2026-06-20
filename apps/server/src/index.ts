@@ -11,6 +11,7 @@ import {
 } from "@enbi/auth";
 import { listRevisions, restoreRevision, writeRevision } from "@enbi/core";
 import { Hono } from "hono";
+import { overlayTranslations, readTranslations, writeTranslations } from "./i18n.ts";
 import {
   countRows,
   deleteRow,
@@ -100,6 +101,7 @@ function mountCollection(
     id: string,
     data: unknown,
   ) => void,
+  configuredLocales: string[],
 ): void {
   const base = `/api/${col.name}`;
   const idOf = (row: Row): string => String(row[col.primaryKey]);
@@ -107,7 +109,7 @@ function mountCollection(
   app.get(base, async (c) => {
     const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
     const q = c.req.query();
-    const reserved = new Set(["limit", "offset", "sort", "_match", "cursor", "expand"]);
+    const reserved = new Set(["limit", "offset", "sort", "_match", "cursor", "expand", "locale"]);
     const validOps = new Set<FilterOp>(["eq", "ne", "like", "gt", "gte", "lt", "lte", "in"]);
     const filters: ListFilter[] = [];
     // assertColumn (via listRows/countRows) throws EnbiError("validation") → 400 for unknown columns/sort.
@@ -153,6 +155,13 @@ function mountCollection(
         filters.push({ column: col.drafts.column, op: "eq", value: "published" });
         match = "all";
       }
+      const localeParam = q.locale;
+      if (localeParam !== undefined && !configuredLocales.includes(localeParam)) {
+        return c.json(
+          { error: "validation", message: `Locale "${localeParam}" is not configured.` },
+          400,
+        );
+      }
       const total = await countRows(ctx.db, col.table, filters, match);
       const rows = await listRows(ctx.db, col.table, {
         limit: effectiveLimit,
@@ -172,6 +181,17 @@ function mountCollection(
       ) {
         const lastRow = rows[rows.length - 1] as Row;
         c.header("X-Next-Cursor", String(lastRow[col.primaryKey]));
+      }
+      let finalRows = rows;
+      if (localeParam !== undefined && col.localized.length > 0) {
+        finalRows = await overlayTranslations(
+          ctx.db,
+          ctx.translations,
+          rows,
+          col.name,
+          localeParam,
+          col.localized,
+        );
       }
       const expandParam = q.expand;
       if (expandParam) {
@@ -193,7 +213,7 @@ function mountCollection(
               `Relation target collection "${col.relations[field].collection}" is not registered.`,
             );
           }
-          for (const row of rows) {
+          for (const row of finalRows) {
             const r = row as Row;
             const expanded = await resolveExpanded(ctx, targetCol, r[field], caller.role);
             (r as Record<string, unknown>)._expanded = {
@@ -203,7 +223,7 @@ function mountCollection(
           }
         }
       }
-      return c.json(rows);
+      return c.json(finalRows);
     } catch (err) {
       if (err instanceof EnbiError && err.code === "validation") {
         return c.json({ error: err.code, message: err.message }, 400);
@@ -247,6 +267,29 @@ function mountCollection(
       throw new EnbiError("not_found", `${col.name} not found.`);
     }
     const q = c.req.query();
+    const localeParam = q.locale;
+    if (localeParam !== undefined) {
+      if (!configuredLocales.includes(localeParam)) {
+        return c.json(
+          { error: "validation", message: `Locale "${localeParam}" is not configured.` },
+          400,
+        );
+      }
+      if (col.localized.length > 0) {
+        const translations = await readTranslations(
+          ctx.db,
+          ctx.translations,
+          col.name,
+          idOf(row),
+          localeParam,
+        );
+        for (const field of col.localized) {
+          if (Object.prototype.hasOwnProperty.call(translations, field)) {
+            (row as Record<string, unknown>)[field] = translations[field];
+          }
+        }
+      }
+    }
     const expandParam = q.expand;
     if (expandParam) {
       try {
@@ -348,6 +391,44 @@ function mountCollection(
     await snapshot(ctx, col, id, caller.userId);
     return c.json(await getRow(ctx.db, col.table, col.primaryKey, id));
   });
+
+  // GET /api/:col/:id/translations/:locale — read stored translations
+  app.get(`${base}/:id/translations/:locale`, async (c) => {
+    await authorize(auth, roles, col, "read", c.req.raw.headers);
+    const id = c.req.param("id");
+    const locale = c.req.param("locale");
+    if (!configuredLocales.includes(locale)) {
+      return c.json({ error: "validation", message: `Locale "${locale}" is not configured.` }, 400);
+    }
+    const existing = await getRow(ctx.db, col.table, col.primaryKey, id);
+    if (!existing) throw new EnbiError("not_found", `${col.name} not found.`);
+    const translations = await readTranslations(ctx.db, ctx.translations, col.name, id, locale);
+    return c.json(translations);
+  });
+
+  // PUT /api/:col/:id/translations/:locale — write translations
+  app.put(`${base}/:id/translations/:locale`, async (c) => {
+    await authorize(auth, roles, col, "update", c.req.raw.headers);
+    const id = c.req.param("id");
+    const locale = c.req.param("locale");
+    if (!configuredLocales.includes(locale)) {
+      return c.json({ error: "validation", message: `Locale "${locale}" is not configured.` }, 400);
+    }
+    const existing = await getRow(ctx.db, col.table, col.primaryKey, id);
+    if (!existing) throw new EnbiError("not_found", `${col.name} not found.`);
+    const body = asObject(await c.req.json());
+    // Validate: every key in body must be in col.localized.
+    const nonLocalized = Object.keys(body).filter((k) => !col.localized.includes(k));
+    if (nonLocalized.length > 0) {
+      return c.json(
+        { error: "validation", message: `Field(s) not translatable: ${nonLocalized.join(", ")}.` },
+        422,
+      );
+    }
+    const fields = Object.fromEntries(Object.entries(body).map(([k, v]) => [k, String(v)]));
+    const stored = await writeTranslations(ctx.db, ctx.translations, col.name, id, locale, fields);
+    return c.json(stored);
+  });
 }
 
 export async function createServer(
@@ -389,9 +470,18 @@ export async function createServer(
 
   mountKeys(app, ctx, config.roles, auth);
   mountMedia(app, ctx, config.roles, auth, config);
-  mountCollectionsMeta(app, config.roles, auth, config.collections);
+  mountCollectionsMeta(app, config.roles, auth, config.collections, config.i18n);
   for (const col of config.collections) {
-    mountCollection(app, ctx, config.roles, auth, col, config.collections, emit);
+    mountCollection(
+      app,
+      ctx,
+      config.roles,
+      auth,
+      col,
+      config.collections,
+      emit,
+      config.i18n?.locales ?? [],
+    );
   }
   return app;
 }
