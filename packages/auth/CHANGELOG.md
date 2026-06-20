@@ -1,5 +1,16 @@
 # @enbi/auth
 
+## 0.6.0
+
+### Minor Changes
+
+- [#20](https://github.com/fbritoferreira/enbi/pull/20) [`0017283`](https://github.com/fbritoferreira/enbi/commit/0017283f61c39147992430a3b80d2a79d1f6f09a) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Content API gains query params (`limit`/`offset`/`sort`/equality filters) with an `X-Total-Count` header, an admin-only `GET /api/admin_collections` metadata endpoint, and optional CORS + better-auth `trustedOrigins` for a configured admin origin. New `enbi auth setup <github|google|oidc>` scaffolds an auth provider. The Astro admin gains a functional core: login, collections, entry CRUD, and API-key management.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @enbi/db@0.6.0
+
 ## 0.5.2
 
 ### Patch Changes
