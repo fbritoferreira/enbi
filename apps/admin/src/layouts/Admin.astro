@@ -1,5 +1,11 @@
 ---
-const { title = "enbi admin" } = Astro.props;
+const { title = "enbi admin", active = "" } = Astro.props;
+const nav = [
+  { href: "/", label: "Collections" },
+  { href: "/media", label: "Media" },
+  { href: "/keys", label: "API keys" },
+  { href: "/users", label: "Users" },
+];
 ---
 <html lang="en">
   <head>
@@ -7,25 +13,264 @@ const { title = "enbi admin" } = Astro.props;
     <meta name="viewport" content="width=device-width" />
     <title>{title}</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 0; }
-      header { display: flex; gap: 1rem; padding: .75rem 1rem; background: #111; color: #fff; }
-      header a { color: #fff; text-decoration: none; }
-      main { padding: 1rem; max-width: 60rem; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid #ddd; padding: .4rem .6rem; text-align: left; }
-      label { display: block; margin: .5rem 0 .2rem; font-weight: 600; }
-      input, textarea { width: 100%; max-width: 30rem; padding: .4rem; }
-      button { margin-top: .75rem; padding: .4rem .8rem; }
-      .error { color: #b00; }
+      /* ── Design tokens ─────────────────────────────────────── */
+      :root {
+        --paper: #f4f1ea;
+        --ink: #1a1714;
+        --muted: #6b645c;
+        --rule: #d8d2c6;
+        --accent: #e2452f;
+        --on-accent: #fff;
+        --ok: #2f7d4f;
+        --danger: #b3361f;
+        --font-display: ui-serif, Georgia, "Times New Roman", serif;
+        --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+        --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+        --sidebar-w: 200px;
+      }
+
+      /* ── Reset ─────────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: var(--font-body);
+        background: var(--paper);
+        color: var(--ink);
+        display: flex;
+        min-height: 100vh;
+      }
+
+      /* ── Sidebar ───────────────────────────────────────────── */
+      .sidebar {
+        position: fixed;
+        top: 0; left: 0; bottom: 0;
+        width: var(--sidebar-w);
+        background: var(--ink);
+        color: var(--paper);
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        z-index: 10;
+      }
+      .sidebar__brand {
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--paper);
+        padding: 1.5rem 1.25rem 1rem;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        display: block;
+      }
+      .sidebar__nav {
+        display: flex;
+        flex-direction: column;
+        padding: 0.75rem 0;
+        flex: 1;
+      }
+      .sidebar__nav a {
+        font-family: var(--font-body);
+        font-size: 0.875rem;
+        color: rgba(244,241,234,0.72);
+        text-decoration: none;
+        padding: 0.6rem 1.25rem;
+        transition: color 0.1s, background 0.1s;
+      }
+      .sidebar__nav a:hover,
+      .sidebar__nav a[aria-current="page"] {
+        color: var(--paper);
+        background: rgba(255,255,255,0.07);
+      }
+      .sidebar__nav a[aria-current="page"] {
+        color: var(--accent);
+        border-left: 2px solid var(--accent);
+        padding-left: calc(1.25rem - 2px);
+      }
+
+      /* ── Main content ──────────────────────────────────────── */
+      .layout-main {
+        margin-left: var(--sidebar-w);
+        flex: 1;
+        padding: 2.5rem 3rem;
+        max-width: calc(64rem + var(--sidebar-w));
+        min-height: 100vh;
+      }
+
+      /* ── Typography ────────────────────────────────────────── */
+      h1 {
+        font-family: var(--font-display);
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        margin: 0 0 1.5rem;
+        color: var(--ink);
+      }
+      h2 {
+        font-family: var(--font-display);
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0 0 1rem;
+      }
+      p { margin: 0 0 1rem; line-height: 1.6; }
+
+      /* ── Tables ────────────────────────────────────────────── */
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.9rem;
+      }
+      thead tr {
+        border-bottom: 1px solid var(--rule);
+      }
+      th {
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        padding: 0.6rem 0.75rem;
+        text-align: left;
+        font-weight: 600;
+      }
+      td {
+        padding: 0.65rem 0.75rem;
+        border-bottom: 1px solid var(--rule);
+        vertical-align: middle;
+      }
+      tbody tr:hover { background: rgba(26,23,20,0.03); }
+      /* Mono ids in tables */
+      td:first-child {
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      /* ── Forms ─────────────────────────────────────────────── */
+      label {
+        display: block;
+        margin: 1rem 0 0.3rem;
+        font-size: 0.8rem;
+        font-family: var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      label .req { color: var(--accent); margin-left: 0.15em; }
+      input:not([type=file]):not([type=checkbox]),
+      textarea,
+      select {
+        display: block;
+        width: 100%;
+        max-width: 32rem;
+        padding: 0.5rem 0.65rem;
+        border: 1px solid var(--rule);
+        border-radius: 3px;
+        background: #fff;
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 0.9rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        outline: none;
+      }
+      input:not([type=file]):not([type=checkbox]):focus-visible,
+      textarea:focus-visible,
+      select:focus-visible {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(226,69,47,0.15);
+      }
+      input[readonly] {
+        background: var(--paper);
+        color: var(--muted);
+        cursor: default;
+      }
+      textarea { min-height: 8rem; resize: vertical; }
+
+      /* ── Buttons ───────────────────────────────────────────── */
+      .btn, button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-top: 1rem;
+        padding: 0.5rem 1rem;
+        border-radius: 3px;
+        font-size: 0.875rem;
+        font-family: var(--font-body);
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: transform 0.1s, box-shadow 0.1s, background 0.1s, color 0.1s;
+        text-decoration: none;
+      }
+      /* Primary = accent fill */
+      button[type=submit],
+      .btn-primary {
+        background: var(--accent);
+        color: var(--on-accent);
+        border-color: var(--accent);
+      }
+      button[type=submit]:hover,
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(226,69,47,0.3);
+      }
+      button[type=submit]:active,
+      .btn-primary:active {
+        transform: translateY(0);
+        box-shadow: none;
+      }
+      /* Secondary = outline */
+      button:not([type=submit]):not(.btn-primary):not(.btn-danger) {
+        background: transparent;
+        color: var(--ink);
+        border-color: var(--rule);
+      }
+      button:not([type=submit]):not(.btn-primary):not(.btn-danger):hover {
+        border-color: var(--muted);
+      }
+      /* Danger */
+      .btn-danger,
+      button#del {
+        background: transparent;
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+      .btn-danger:hover,
+      button#del:hover {
+        background: var(--danger);
+        color: #fff;
+      }
+
+      /* ── Error / status text ───────────────────────────────── */
+      .error { color: var(--danger); font-size: 0.875rem; margin: 0.5rem 0; }
+      .ok    { color: var(--ok);     font-size: 0.875rem; margin: 0.5rem 0; }
+
+      /* ── Fade-in animation for main content ────────────────── */
+      @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .layout-main { animation: fadeUp 0.25s ease both; }
+
+      /* ── Utility ───────────────────────────────────────────── */
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .mono { font-family: var(--font-mono); font-size: 0.8rem; }
     </style>
   </head>
   <body>
-    <header>
-      <a href="/">Collections</a>
-      <a href="/users">Users</a>
-      <a href="/keys">API keys</a>
-      <a href="/media">Media</a>
-    </header>
-    <main><slot /></main>
+    <aside class="sidebar">
+      <a class="sidebar__brand" href="/">enbi</a>
+      <nav class="sidebar__nav">
+        {nav.map(({ href, label }) => (
+          <a href={href} aria-current={active === href ? "page" : undefined}>{label}</a>
+        ))}
+      </nav>
+    </aside>
+    <main class="layout-main">
+      <slot />
+    </main>
   </body>
 </html>
