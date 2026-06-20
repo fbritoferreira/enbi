@@ -27,6 +27,7 @@ import { errorHandler, ValidationError } from "./errors.ts";
 import { validateFields } from "./validate.ts";
 import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
+import { mountSetup } from "./setup.ts";
 import { mountMedia } from "./media.ts";
 import { mountProviders } from "./providers.ts";
 import { authorize, PUBLIC_ROLE } from "./guard.ts";
@@ -473,6 +474,7 @@ export async function createServer(
 
   const emit = makeWebhookEmitter(config.webhooks, opts.webhookSink ?? defaultWebhookSink);
 
+  mountSetup(app, ctx, config.auth);
   mountKeys(app, ctx, config.roles, auth);
   mountMedia(app, ctx, config.roles, auth, config);
   mountCollectionsMeta(app, config.roles, auth, config.collections, config.i18n);
