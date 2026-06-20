@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import {
   countRows,
   deleteRow,
+  type FilterOp,
   getRow,
   insertRow,
   type ListFilter,
@@ -66,24 +67,62 @@ function mountCollection(
   app.get(base, async (c) => {
     await authorize(auth, roles, col, "read", c.req.raw.headers);
     const q = c.req.query();
-    const reserved = new Set(["limit", "offset", "sort"]);
-    const filters: ListFilter[] = Object.entries(q)
-      .filter(([k]) => !reserved.has(k))
-      .map(([column, value]) => ({ column, value }));
-    const sortRaw = q.sort;
-    const sort = sortRaw
-      ? {
-          column: sortRaw.replace(/^-/, ""),
-          dir: sortRaw.startsWith("-") ? ("desc" as const) : ("asc" as const),
-        }
-      : undefined;
-    const limit = q.limit !== undefined ? Math.min(Number(q.limit) || 0, 100) : undefined;
-    const offset = q.offset !== undefined ? Number(q.offset) || 0 : undefined;
+    const reserved = new Set(["limit", "offset", "sort", "_match", "cursor"]);
+    const validOps = new Set<FilterOp>(["eq", "ne", "like", "gt", "gte", "lt", "lte", "in"]);
+    const filters: ListFilter[] = [];
     // assertColumn (via listRows/countRows) throws EnbiError("validation") → 400 for unknown columns/sort.
     try {
-      const total = await countRows(ctx.db, col.table, filters);
-      const rows = await listRows(ctx.db, col.table, { limit, offset, sort, filters });
+      for (const [key, value] of Object.entries(q)) {
+        if (reserved.has(key)) continue;
+        const dunder = key.lastIndexOf("__");
+        if (dunder !== -1) {
+          const column = key.slice(0, dunder);
+          const opRaw = key.slice(dunder + 2);
+          if (!validOps.has(opRaw as FilterOp)) {
+            throw new EnbiError("validation", `Unknown filter operator "${opRaw}".`);
+          }
+          filters.push({ column, op: opRaw as FilterOp, value });
+        } else {
+          filters.push({ column: key, op: "eq", value });
+        }
+      }
+      const sortRaw = q.sort;
+      const sort = sortRaw
+        ? {
+            column: sortRaw.replace(/^-/, ""),
+            dir: sortRaw.startsWith("-") ? ("desc" as const) : ("asc" as const),
+          }
+        : undefined;
+      const limit =
+        q.limit !== undefined ? Math.max(0, Math.min(Number(q.limit) || 0, 100)) : undefined;
+      const offset = q.offset !== undefined ? Number(q.offset) || 0 : undefined;
+      const match: "all" | "any" = q._match === "any" ? "any" : "all";
+      const cursor = q.cursor;
+      // cursor mode must always be bounded
+      const effectiveLimit = cursor !== undefined && limit === undefined ? 100 : limit;
+      if (filters.length > 50) {
+        throw new EnbiError("validation", "Too many filters (max 50).");
+      }
+      const total = await countRows(ctx.db, col.table, filters, match);
+      const rows = await listRows(ctx.db, col.table, {
+        limit: effectiveLimit,
+        offset,
+        sort,
+        filters,
+        match,
+        cursor,
+        primaryKey: col.primaryKey,
+      });
       c.header("X-Total-Count", String(total));
+      if (
+        cursor !== undefined &&
+        rows.length > 0 &&
+        effectiveLimit !== undefined &&
+        rows.length === effectiveLimit
+      ) {
+        const lastRow = rows[rows.length - 1] as Row;
+        c.header("X-Next-Cursor", String(lastRow[col.primaryKey]));
+      }
       return c.json(rows);
     } catch (err) {
       if (err instanceof EnbiError && err.code === "validation") {
@@ -175,7 +214,7 @@ export async function createServer(
         credentials: true,
         allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: ["content-type", "x-api-key", "authorization"],
-        exposeHeaders: ["X-Total-Count"],
+        exposeHeaders: ["X-Total-Count", "X-Next-Cursor"],
       }),
     );
   }
