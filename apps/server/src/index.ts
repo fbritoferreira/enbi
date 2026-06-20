@@ -25,6 +25,7 @@ import {
 import { errorHandler } from "./errors.ts";
 import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
+import { mountProviders } from "./providers.ts";
 import { authorize } from "./guard.ts";
 
 export type CreateServerOptions = {
@@ -220,6 +221,7 @@ export async function createServer(
   }
 
   app.get("/health", (c) => c.json({ status: "ok" }));
+  mountProviders(app, config);
 
   let auth = opts.authProvider;
   if (!auth) {

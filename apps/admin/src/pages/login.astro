@@ -11,8 +11,9 @@ import Admin from "../layouts/Admin.astro";
     <button type="submit">Sign in</button>
     <p class="error" id="err" hidden></p>
   </form>
+  <div id="providers"></div>
   <script>
-    import { enbiFetch } from "../lib/api.ts";
+    import { enbiFetch, escapeHtml } from "../lib/api.ts";
     const form = document.getElementById("login") as HTMLFormElement;
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -26,5 +27,30 @@ import Admin from "../layouts/Admin.astro";
       const err = document.getElementById("err")!;
       err.hidden = false; err.textContent = `Sign-in failed (${res.status}).`;
     });
+
+    (async () => {
+      const res = await enbiFetch("/api/admin_providers");
+      if (!res.ok) return;
+      const { social, sso } = await res.json() as { social: string[]; sso: string[] };
+      const ids = [...social, ...sso];
+      if (ids.length === 0) return;
+      const providersEl = document.getElementById("providers")!;
+      providersEl.innerHTML = ids
+        .map(id => `<button data-provider="${escapeHtml(id)}" type="button">Sign in with ${escapeHtml(id)}</button>`)
+        .join("");
+      providersEl.querySelectorAll<HTMLButtonElement>("button").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.dataset.provider ?? "";
+          const res = await enbiFetch("/api/admin_auth/sign-in/social", {
+            method: "POST",
+            body: JSON.stringify({ provider, callbackURL: "/" }),
+          });
+          if (res.ok) {
+            const { url } = await res.json() as { url: string };
+            window.location.href = url;
+          }
+        });
+      });
+    })();
   </script>
 </Admin>

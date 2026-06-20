@@ -12,10 +12,27 @@ import Admin from "../layouts/Admin.astro";
     document.getElementById("title")!.textContent = name;
     (document.getElementById("new") as HTMLAnchorElement).href = `/edit?c=${encodeURIComponent(name)}&id=new`;
     const limit = 20; let offset = 0;
+
+    type CollectionMeta = { name: string; title: string | null; primaryKey: string; columns: { name: string }[] };
+    let colMeta: CollectionMeta | null = null;
+
+    (async () => {
+      const metaRes = await enbiFetch("/api/admin_collections");
+      if (metaRes.status === 401) { location.href = "/login"; return; }
+      if (metaRes.ok) {
+        const collections = await metaRes.json() as CollectionMeta[];
+        colMeta = collections.find(c => c.name === name) ?? null;
+      }
+      void load();
+    })();
+
     async function load() {
       const q = (document.getElementById("q") as HTMLInputElement).value.trim();
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-      if (q) params.set("id", q);
+      if (q && colMeta) {
+        const filterCol = colMeta.title ?? colMeta.primaryKey;
+        params.set(`${filterCol}__like`, q);
+      }
       const res = await enbiFetch(`/api/${name}?${params.toString()}`);
       if (res.status === 401) { location.href = "/login"; return; }
       const total = Number(res.headers.get("X-Total-Count") ?? "0");
@@ -26,6 +43,5 @@ import Admin from "../layouts/Admin.astro";
         .join("");
     }
     document.getElementById("q")!.addEventListener("input", () => { offset = 0; void load(); });
-    void load();
   </script>
 </Admin>

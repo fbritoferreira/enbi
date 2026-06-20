@@ -3,6 +3,7 @@ import Admin from "../layouts/Admin.astro";
 ---
 <Admin title="Edit — enbi">
   <h1 id="heading">Entry</h1>
+  <p id="hist-link" hidden><a id="hist-a" href="#">History</a></p>
   <form id="form"></form>
   <button id="del" hidden>Delete</button>
   <p class="error" id="err" hidden></p>
@@ -15,6 +16,13 @@ import Admin from "../layouts/Admin.astro";
 
     const heading = document.getElementById("heading");
     if (heading) heading.textContent = isNew ? `New ${name}` : `Edit ${name}/${id}`;
+
+    const histLink = document.getElementById("hist-link");
+    const histA = document.getElementById("hist-a") as HTMLAnchorElement | null;
+    if (!isNew && histLink && histA) {
+      histLink.hidden = false;
+      histA.href = `/revisions?c=${encodeURIComponent(name)}&id=${encodeURIComponent(id)}`;
+    }
 
     const form = document.getElementById("form") as HTMLFormElement | null;
     const errEl = document.getElementById("err");
