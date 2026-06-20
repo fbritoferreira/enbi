@@ -7,7 +7,13 @@ export {
   sqliteApiKeys,
 } from "./apikeys.ts";
 export { collection, isPublicAction } from "./collection.ts";
-export type { AnyCollection, Collection, CollectionOptions, PublicAccess } from "./collection.ts";
+export type {
+  AnyCollection,
+  Collection,
+  CollectionOptions,
+  FieldRule,
+  PublicAccess,
+} from "./collection.ts";
 export {
   defineEnbiConfig,
   type EnbiAuthConfig,

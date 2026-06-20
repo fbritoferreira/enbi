@@ -10,6 +10,7 @@ import {
   hashApiKey,
 } from "@enbi/auth";
 import { collection, createDb, defineEnbiConfig, type EnbiDb } from "@enbi/db";
+import { validateFields } from "../src/validate.ts";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
@@ -1671,4 +1672,147 @@ test("webhooks: signature equals independently-computed HMAC-SHA256 of JSON.stri
   // Independently compute the expected HMAC-SHA256.
   const expectedHex = createHmac("sha256", secret).update(JSON.stringify(d.payload)).digest("hex");
   expect(d.signature).toBe(`sha256=${expectedHex}`);
+});
+
+// ── Field Validation (ADR-0049) ───────────────────────────────────────────────
+
+// Table for validation tests: id, title (text), views (integer), email (text).
+const validatedPosts = sqliteTable("validated_posts", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  views: integer("views").notNull(),
+  email: text("email").notNull(),
+});
+
+async function buildValidationApp() {
+  const vCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await vCtx.db.run(
+    sql`CREATE TABLE validated_posts (
+      id text PRIMARY KEY,
+      title text NOT NULL,
+      views integer NOT NULL,
+      email text NOT NULL
+    )`,
+  );
+  await vCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await vCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const col = collection(validatedPosts, {
+    name: "validated_posts",
+    validate: {
+      title: { required: true, max: 5 },
+      views: { type: "number", min: 0 },
+      email: { type: "email" },
+    },
+  });
+  const vApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [col],
+    },
+    { db: vCtx, authProvider: stubAuth },
+  );
+  return vApp;
+}
+
+test("validation: POST missing required title → 422 with title error", async () => {
+  const vApp = await buildValidationApp();
+  const res = await vApp.request("/api/validated_posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p1", views: 1, email: "a@b.com" }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((e) => e.field === "title")).toBe(true);
+});
+
+test("validation: POST title too long (>5 chars) → 422", async () => {
+  const vApp = await buildValidationApp();
+  const res = await vApp.request("/api/validated_posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p2", title: "toolong", views: 1, email: "a@b.com" }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((e) => e.field === "title")).toBe(true);
+});
+
+test("validation: POST views negative → 422", async () => {
+  const vApp = await buildValidationApp();
+  const res = await vApp.request("/api/validated_posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p3", title: "hi", views: -1, email: "a@b.com" }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((e) => e.field === "views")).toBe(true);
+});
+
+test("validation: POST views non-numeric string → 422", async () => {
+  const vApp = await buildValidationApp();
+  const res = await vApp.request("/api/validated_posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p4", title: "hi", views: "abc", email: "a@b.com" }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((e) => e.field === "views")).toBe(true);
+});
+
+test("validation: POST invalid email → 422", async () => {
+  const vApp = await buildValidationApp();
+  const res = await vApp.request("/api/validated_posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p5", title: "hi", views: 0, email: "not-an-email" }),
+  });
+  expect(res.status).toBe(422);
+  const body = (await res.json()) as { details: { field: string }[] };
+  expect(body.details.some((e) => e.field === "email")).toBe(true);
+});
+
+test("validation: POST valid body → 201", async () => {
+  const vApp = await buildValidationApp();
+  const res = await vApp.request("/api/validated_posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "p6", title: "hello", views: 10, email: "user@example.com" }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("validation: collection with NO validate rules is unaffected", async () => {
+  // The shared `posts` collection (no validate) must still allow any valid row.
+  const res = await app.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "editor" },
+    body: JSON.stringify({ id: "novalidate", title: "anything", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+});
+
+test("validation: validateFields unit — returns ALL errors for a multi-rule body", async () => {
+  const errors = validateFields(
+    {
+      title: { required: true, max: 5 },
+      views: { type: "number", min: 0 },
+      email: { type: "email" },
+    },
+    { views: -99, email: "not-valid" }, // title missing, views negative, email bad
+  );
+  // All three fields should have errors
+  const fields = errors.map((e) => e.field);
+  expect(fields).toContain("title");
+  expect(fields).toContain("views");
+  expect(fields).toContain("email");
+  expect(errors.length).toBeGreaterThanOrEqual(3);
 });

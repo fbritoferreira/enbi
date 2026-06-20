@@ -1,6 +1,6 @@
 // @enbi/server — GET /api/admin_collections: collection metadata for the admin UI
 // (admin-only, ADR-0041). The admin renders nav + forms from this, never from config.
-import type { AnyCollection, EnbiConfig } from "@enbi/db";
+import type { AnyCollection, EnbiConfig, FieldRule } from "@enbi/db";
 import type { AuthProvider } from "@enbi/auth";
 import { getTableColumns } from "drizzle-orm";
 import type { Hono } from "hono";
@@ -19,6 +19,8 @@ type CollectionMeta = {
   drafts: { column: string } | false;
   /** FK relations declared on this collection. (ADR-0046) */
   relations: Record<string, { collection: string }>;
+  /** Per-field validation rules for this collection. (ADR-0049) */
+  validate: Record<string, FieldRule>;
 };
 
 function metaOf(col: AnyCollection): CollectionMeta {
@@ -34,6 +36,7 @@ function metaOf(col: AnyCollection): CollectionMeta {
     columns,
     drafts: col.drafts,
     relations: col.relations,
+    validate: col.validate,
   };
 }
 
