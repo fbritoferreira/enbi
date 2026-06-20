@@ -98,7 +98,7 @@ function mountCollection(
       const limit =
         q.limit !== undefined ? Math.max(0, Math.min(Number(q.limit) || 0, 100)) : undefined;
       const offset = q.offset !== undefined ? Number(q.offset) || 0 : undefined;
-      const match: "all" | "any" = q._match === "any" ? "any" : "all";
+      let match: "all" | "any" = q._match === "any" ? "any" : "all";
       const cursor = q.cursor;
       // cursor mode must always be bounded
       const effectiveLimit = cursor !== undefined && limit === undefined ? 100 : limit;
@@ -106,8 +106,14 @@ function mountCollection(
         throw new EnbiError("validation", "Too many filters (max 50).");
       }
       // Draft filtering: public callers only see published rows (ADR-0045).
+      // Force match="all" so the status=published predicate is always ANDed with
+      // user-supplied filters even when the caller sends _match=any. Public callers
+      // on a drafts collection have no legitimate need for OR semantics that crosses
+      // the status boundary; OR semantics still apply across their own filter set
+      // because we enforce "all" only when this gate is active.
       if (col.drafts && caller.role === PUBLIC_ROLE) {
         filters.push({ column: col.drafts.column, op: "eq", value: "published" });
+        match = "all";
       }
       const total = await countRows(ctx.db, col.table, filters, match);
       const rows = await listRows(ctx.db, col.table, {
@@ -186,11 +192,19 @@ function mountCollection(
   });
 
   app.get(`${base}/:id/revisions`, async (c) => {
-    await authorize(auth, roles, col, "read", c.req.raw.headers);
+    const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
+    const id = c.req.param("id");
+    // Draft gate: public callers cannot access revision history of unpublished entries (ADR-0045).
+    if (col.drafts && caller.role === PUBLIC_ROLE) {
+      const row = await getRow(ctx.db, col.table, col.primaryKey, id);
+      if (!row || row[col.drafts.column] !== "published") {
+        throw new EnbiError("not_found", `${col.name} not found.`);
+      }
+    }
     return c.json(
       await listRevisions(ctx.db, ctx.revisions, {
         collection: col.name,
-        entryId: c.req.param("id"),
+        entryId: id,
       }),
     );
   });
