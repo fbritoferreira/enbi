@@ -45,6 +45,18 @@ export type EnbiAuthConfig = {
   apiKeys?: boolean;
 };
 
+export type WebhookEvent = "create" | "update" | "delete";
+
+export type WebhookConfig = {
+  url: string;
+  /** Events that trigger delivery. Defaults to all three. */
+  events?: WebhookEvent[];
+  /** Collection names that trigger delivery. Defaults to all collections. */
+  collections?: string[];
+  /** When set, signs the body with HMAC-SHA256; value sent in X-Enbi-Signature. */
+  secret?: string;
+};
+
 export type EnbiConfig = {
   db: EnbiDbConfig;
   auth: EnbiAuthConfig;
@@ -54,6 +66,8 @@ export type EnbiConfig = {
   admin?: { origin?: string };
   /** Local-disk media store configuration (ADR-0044). */
   media?: { dir?: string };
+  /** Outbound webhook endpoints notified on content mutations (ADR-0047). */
+  webhooks?: WebhookConfig[];
 };
 
 /** Identity helper that gives the user full type-checking on their config. */

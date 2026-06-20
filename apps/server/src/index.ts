@@ -28,12 +28,15 @@ import { mountKeys } from "./keys.ts";
 import { mountMedia } from "./media.ts";
 import { mountProviders } from "./providers.ts";
 import { authorize, PUBLIC_ROLE } from "./guard.ts";
+import { defaultWebhookSink, makeWebhookEmitter, type WebhookSink } from "./webhooks.ts";
 
 export type CreateServerOptions = {
   /** Inject an auth provider (tests). Defaults to a better-auth-backed one. */
   authProvider?: AuthProvider;
   /** Inject an already-created db context (tests). Defaults to createDb(config.db). */
   db?: EnbiDb;
+  /** Inject a webhook sink (tests). Defaults to the real fire-and-forget fetch sink. */
+  webhookSink?: WebhookSink;
 };
 
 function asObject(body: unknown): Row {
@@ -90,6 +93,12 @@ function mountCollection(
   auth: AuthProvider,
   col: AnyCollection,
   collections: AnyCollection[],
+  emit: (
+    event: "create" | "update" | "delete",
+    collection: string,
+    id: string,
+    data: unknown,
+  ) => void,
 ): void {
   const base = `/api/${col.name}`;
   const idOf = (row: Row): string => String(row[col.primaryKey]);
@@ -217,6 +226,7 @@ function mountCollection(
     }
     await insertRow(ctx.db, col.table, body);
     await snapshot(ctx, col, id, caller.userId);
+    emit("create", col.name, id, body);
     return c.json(body, 201);
   });
 
@@ -273,7 +283,9 @@ function mountCollection(
     if (!existing) throw new EnbiError("not_found", `${col.name} not found.`);
     await updateRow(ctx.db, col.table, col.primaryKey, id, asObject(await c.req.json()));
     await snapshot(ctx, col, id, caller.userId);
-    return c.json(await getRow(ctx.db, col.table, col.primaryKey, id));
+    const updated = await getRow(ctx.db, col.table, col.primaryKey, id);
+    emit("update", col.name, id, updated);
+    return c.json(updated);
   });
 
   app.delete(`${base}/:id`, async (c) => {
@@ -282,6 +294,7 @@ function mountCollection(
     const existing = await getRow(ctx.db, col.table, col.primaryKey, id);
     if (!existing) throw new EnbiError("not_found", `${col.name} not found.`);
     await deleteRow(ctx.db, col.table, col.primaryKey, id);
+    emit("delete", col.name, id, { id });
     return c.body(null, 204);
   });
 
@@ -354,11 +367,13 @@ export async function createServer(
     auth = composeProviders(apiKeyProvider(ctx.db, ctx.apiKeys), betterAuthProvider(instance));
   }
 
+  const emit = makeWebhookEmitter(config.webhooks, opts.webhookSink ?? defaultWebhookSink);
+
   mountKeys(app, ctx, config.roles, auth);
   mountMedia(app, ctx, config.roles, auth, config);
   mountCollectionsMeta(app, config.roles, auth, config.collections);
   for (const col of config.collections) {
-    mountCollection(app, ctx, config.roles, auth, col, config.collections);
+    mountCollection(app, ctx, config.roles, auth, col, config.collections, emit);
   }
   return app;
 }
