@@ -28,6 +28,12 @@ export type CollectionOptions = {
    * `true` uses column name "status". An object `{ column: "my_col" }` overrides.
    */
   drafts?: boolean | { column?: string };
+  /**
+   * Declare FK relations on this collection. Keys are the JS property name of
+   * the column that holds the target row's primary key; values name the target
+   * collection. Used by the server's `?expand` query parameter.
+   */
+  relations?: Record<string, { collection: string }>;
 };
 
 export type Collection<T extends Table = Table> = {
@@ -45,6 +51,11 @@ export type Collection<T extends Table = Table> = {
    * drafts. (ADR-0045)
    */
   drafts: { column: string } | false;
+  /**
+   * FK relations declared on this collection. Keys are the JS property name of
+   * the column holding the target row's PK; values name the target collection.
+   */
+  relations: Record<string, { collection: string }>;
 };
 
 export type AnyCollection = Collection;
@@ -85,6 +96,7 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     public: options.public ?? false,
     primaryKey: resolvePrimaryKey(options.name, table),
     drafts: normalizeDrafts(options.drafts),
+    relations: options.relations ?? {},
   };
 }
 
