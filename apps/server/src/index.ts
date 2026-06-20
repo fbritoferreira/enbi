@@ -62,6 +62,7 @@ function mountCollection(
   roles: EnbiConfig["roles"],
   auth: AuthProvider,
   col: AnyCollection,
+  collections: AnyCollection[],
 ): void {
   const base = `/api/${col.name}`;
   const idOf = (row: Row): string => String(row[col.primaryKey]);
@@ -69,7 +70,7 @@ function mountCollection(
   app.get(base, async (c) => {
     const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
     const q = c.req.query();
-    const reserved = new Set(["limit", "offset", "sort", "_match", "cursor"]);
+    const reserved = new Set(["limit", "offset", "sort", "_match", "cursor", "expand"]);
     const validOps = new Set<FilterOp>(["eq", "ne", "like", "gt", "gte", "lt", "lte", "in"]);
     const filters: ListFilter[] = [];
     // assertColumn (via listRows/countRows) throws EnbiError("validation") → 400 for unknown columns/sort.
@@ -135,6 +136,45 @@ function mountCollection(
         const lastRow = rows[rows.length - 1] as Row;
         c.header("X-Next-Cursor", String(lastRow[col.primaryKey]));
       }
+      const expandParam = q.expand;
+      if (expandParam) {
+        const expandFields = expandParam
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        for (const field of expandFields) {
+          if (!col.relations[field]) {
+            throw new EnbiError(
+              "validation",
+              `"${field}" is not a declared relation on "${col.name}".`,
+            );
+          }
+          const targetCol = collections.find((c) => c.name === col.relations[field].collection);
+          if (!targetCol) {
+            throw new EnbiError(
+              "config",
+              `Relation target collection "${col.relations[field].collection}" is not registered.`,
+            );
+          }
+          for (const row of rows) {
+            const r = row as Row;
+            const fkValue = r[field];
+            let expanded: Row | undefined;
+            if (fkValue != null && fkValue !== "") {
+              expanded = await getRow(
+                ctx.db,
+                targetCol.table,
+                targetCol.primaryKey,
+                fkValue as string,
+              );
+            }
+            (r as Record<string, unknown>)._expanded = {
+              ...((r as Record<string, unknown>)._expanded as object | undefined),
+              [field]: expanded ?? null,
+            };
+          }
+        }
+      }
       return c.json(rows);
     } catch (err) {
       if (err instanceof EnbiError && err.code === "validation") {
@@ -169,6 +209,50 @@ function mountCollection(
     // Draft gate: hide non-published rows from public callers (ADR-0045).
     if (col.drafts && caller.role === PUBLIC_ROLE && row[col.drafts.column] !== "published") {
       throw new EnbiError("not_found", `${col.name} not found.`);
+    }
+    const q = c.req.query();
+    const expandParam = q.expand;
+    if (expandParam) {
+      try {
+        const expandFields = expandParam
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        for (const field of expandFields) {
+          if (!col.relations[field]) {
+            throw new EnbiError(
+              "validation",
+              `"${field}" is not a declared relation on "${col.name}".`,
+            );
+          }
+          const targetCol = collections.find((c) => c.name === col.relations[field].collection);
+          if (!targetCol) {
+            throw new EnbiError(
+              "config",
+              `Relation target collection "${col.relations[field].collection}" is not registered.`,
+            );
+          }
+          const fkValue = row[field];
+          let expanded: Row | undefined;
+          if (fkValue != null && fkValue !== "") {
+            expanded = await getRow(
+              ctx.db,
+              targetCol.table,
+              targetCol.primaryKey,
+              fkValue as string,
+            );
+          }
+          (row as Record<string, unknown>)._expanded = {
+            ...((row as Record<string, unknown>)._expanded as object | undefined),
+            [field]: expanded ?? null,
+          };
+        }
+      } catch (err) {
+        if (err instanceof EnbiError && err.code === "validation") {
+          return c.json({ error: err.code, message: err.message }, 400);
+        }
+        throw err;
+      }
     }
     return c.json(row);
   });
@@ -265,7 +349,7 @@ export async function createServer(
   mountMedia(app, ctx, config.roles, auth, config);
   mountCollectionsMeta(app, config.roles, auth, config.collections);
   for (const col of config.collections) {
-    mountCollection(app, ctx, config.roles, auth, col);
+    mountCollection(app, ctx, config.roles, auth, col, config.collections);
   }
   return app;
 }
