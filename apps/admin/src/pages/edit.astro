@@ -43,20 +43,15 @@ import Admin from "../layouts/Admin.astro";
         relations: Record<string, { collection: string }>;
         validate: Record<string, FieldRule>;
         localized: string[];
-      };
-      type AdminCollectionsPayload = {
-        collections: ColMeta[];
         locales: string[];
-        defaultLocale: string | undefined;
+        defaultLocale: string | null;
       };
 
-      const payload = (await metaRes.json()) as AdminCollectionsPayload;
-      // Support both old (array) and new (object) response shapes gracefully.
-      const allMeta: ColMeta[] = Array.isArray(payload) ? payload : (payload.collections ?? []);
-      const configuredLocales: string[] = Array.isArray(payload) ? [] : (payload.locales ?? []);
-      const defaultLocale: string = Array.isArray(payload) ? "en" : (payload.defaultLocale ?? (configuredLocales[0] ?? ""));
+      const allMeta = (await metaRes.json()) as ColMeta[];
 
       const col = allMeta.find((m) => m.name === name);
+      const configuredLocales: string[] = col?.locales ?? [];
+      const defaultLocale: string = col?.defaultLocale ?? configuredLocales[0] ?? "";
 
       if (!col || !form) {
         showErr("Collection not found.");

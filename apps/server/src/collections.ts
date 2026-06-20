@@ -23,17 +23,13 @@ type CollectionMeta = {
   validate: Record<string, FieldRule>;
   /** Names of translatable fields (ADR-0050). Empty array = none. */
   localized: string[];
-};
-
-type CollectionsMeta = {
-  collections: CollectionMeta[];
-  /** Configured i18n locales (ADR-0050). Empty if i18n not configured. */
+  /** Configured i18n locales (ADR-0050). Same on every entry; empty if i18n not configured. */
   locales: string[];
-  /** Default locale (ADR-0050). Undefined if i18n not configured. */
-  defaultLocale: string | undefined;
+  /** Default locale (ADR-0050). Null if i18n not configured. */
+  defaultLocale: string | null;
 };
 
-function metaOf(col: AnyCollection): CollectionMeta {
+function metaOf(col: AnyCollection, i18n?: EnbiConfig["i18n"]): CollectionMeta {
   const columns = Object.entries(getTableColumns(col.table)).map(([name, c]) => ({
     name,
     type: (c as { dataType?: string }).dataType ?? "unknown",
@@ -48,6 +44,8 @@ function metaOf(col: AnyCollection): CollectionMeta {
     relations: col.relations,
     validate: col.validate,
     localized: col.localized,
+    locales: i18n?.locales ?? [],
+    defaultLocale: i18n?.defaultLocale ?? null,
   };
 }
 
@@ -60,11 +58,6 @@ export function mountCollectionsMeta(
 ): void {
   app.get("/api/admin_collections", async (c) => {
     await authorizeResource(auth, roles, RESOURCE, "read", c.req.raw.headers, OPTS);
-    const payload: CollectionsMeta = {
-      collections: collections.map(metaOf),
-      locales: i18n?.locales ?? [],
-      defaultLocale: i18n?.defaultLocale,
-    };
-    return c.json(payload);
+    return c.json(collections.map((col) => metaOf(col, i18n)));
   });
 }

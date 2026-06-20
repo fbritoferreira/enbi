@@ -678,19 +678,18 @@ test("GET /api/admin_collections returns metadata, admin-only", async () => {
   const ok = await app.request("/api/admin_collections", { headers: { "x-role": "admin" } });
   expect(ok.status).toBe(200);
   const payload = (await ok.json()) as {
-    collections: {
-      name: string;
-      primaryKey: string;
-      columns: { name: string }[];
-    }[];
+    name: string;
+    primaryKey: string;
+    columns: { name: string }[];
     locales: string[];
-    defaultLocale: string | undefined;
-  };
-  const posts0 = payload.collections.find((m) => m.name === "posts");
+    defaultLocale: string | null;
+  }[];
+  expect(Array.isArray(payload)).toBe(true);
+  const posts0 = payload.find((m) => m.name === "posts");
   expect(posts0?.primaryKey).toBe("id");
   expect(posts0?.columns.map((col) => col.name).sort()).toEqual(["id", "title", "views"]);
-  expect(payload.locales).toEqual([]);
-  expect(payload.defaultLocale).toBeUndefined();
+  expect(posts0?.locales).toEqual([]);
+  expect(posts0?.defaultLocale).toBeNull();
 
   // viewer (read shorthand) is NOT admin → 403
   const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
