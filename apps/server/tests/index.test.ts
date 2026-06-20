@@ -574,6 +574,81 @@ test("fix: in-filter with >100 items returns 400 with correct message", async ()
   expect(body.message).toBe("Too many values in 'in' filter (max 100).");
 });
 
+// ── GET /api/admin_providers ─────────────────────────────────────────────────
+
+test("GET /api/admin_providers returns social and sso provider ids", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: {
+        secret: "x",
+        social: { github: { clientId: "gh-id", clientSecret: "gh-secret" } },
+        ssoProviders: [
+          {
+            providerId: "mock",
+            clientId: "mock-id",
+            clientSecret: "mock-secret",
+            authorizationUrl: "https://mock.example/oauth/authorize",
+            tokenUrl: "https://mock.example/oauth/token",
+          },
+        ],
+      },
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/admin_providers");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { social: string[]; sso: string[] };
+  expect(body.social).toEqual(["github"]);
+  expect(body.sso).toEqual(["mock"]);
+});
+
+test("GET /api/admin_providers returns empty arrays when no social/sso configured", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  const res = await app.request("/api/admin_providers");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { social: string[]; sso: string[] };
+  expect(body.social).toEqual([]);
+  expect(body.sso).toEqual([]);
+});
+
+test("GET /api/admin_providers is accessible without authentication", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: {
+        secret: "x",
+        social: { google: { clientId: "g-id", clientSecret: "g-secret" } },
+      },
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // No headers at all — no x-role, no x-api-key, no Authorization
+  const res = await app.request("/api/admin_providers");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { social: string[]; sso: string[] };
+  expect(body.social).toEqual(["google"]);
+  expect(body.sso).toEqual([]);
+});
+
 test("GET /api/admin_collections returns metadata, admin-only", async () => {
   const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
   const app = await createServer(
