@@ -15,6 +15,8 @@ type CollectionMeta = {
   title: string | null;
   primaryKey: string;
   columns: ColumnMeta[];
+  /** Draft/publish configuration. `false` means disabled. (ADR-0045) */
+  drafts: { column: string } | false;
 };
 
 function metaOf(col: AnyCollection): CollectionMeta {
@@ -23,7 +25,13 @@ function metaOf(col: AnyCollection): CollectionMeta {
     type: (c as { dataType?: string }).dataType ?? "unknown",
     notNull: Boolean((c as { notNull?: boolean }).notNull),
   }));
-  return { name: col.name, title: col.title ?? null, primaryKey: col.primaryKey, columns };
+  return {
+    name: col.name,
+    title: col.title ?? null,
+    primaryKey: col.primaryKey,
+    columns,
+    drafts: col.drafts,
+  };
 }
 
 export function mountCollectionsMeta(
