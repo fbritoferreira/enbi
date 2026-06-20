@@ -1043,3 +1043,86 @@ test("drafts: non-drafts collection is unaffected — no status filtering", asyn
   expect(rows).toHaveLength(1);
   expect(rows[0].id).toBe("p1");
 });
+
+test("fix: auth provider that throws is treated as anonymous — public reads return 200, not 500", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Published','published')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a2','Draft','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+
+  // Auth provider that always rejects — simulates a broken/unavailable provider.
+  const brokenAuth: AuthProvider = {
+    authenticate() {
+      return Promise.reject(new Error("auth service unavailable"));
+    },
+  };
+
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: brokenAuth },
+  );
+
+  // Public read must succeed (200) — broken auth provider falls back to anonymous.
+  const res = await app.request("/api/articles");
+  expect(res.status).toBe(200);
+  // Only published rows visible (anonymous = PUBLIC_ROLE → draft gate applies).
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id)).toEqual(["a1"]);
+  expect(res.headers.get("X-Total-Count")).toBe("1");
+});
+
+test("fix: POST with status: null defaults to draft, not leaked as null", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // POST with an explicit null status — must be coerced to "draft".
+  const create = await app.request("/api/articles", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "a1", title: "Null-status article", status: null }),
+  });
+  expect(create.status).toBe(201);
+  const created = (await create.json()) as { status: string };
+  expect(created.status).toBe("draft");
+
+  // Public list should not see the row (it is a draft).
+  const pub = await app.request("/api/articles");
+  expect(pub.status).toBe(200);
+  const rows = (await pub.json()) as unknown[];
+  expect(rows).toHaveLength(0);
+  expect(pub.headers.get("X-Total-Count")).toBe("0");
+});
