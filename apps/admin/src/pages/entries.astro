@@ -1,11 +1,19 @@
 ---
 import Admin from "../layouts/Admin.astro";
 ---
-<Admin title="Entries — enbi">
+<Admin title="Entries — enbi" active="/">
   <h1 id="title">Entries</h1>
-  <p><a id="new" href="#">+ New entry</a> · <input id="q" placeholder="search…" /></p>
-  <p id="page"></p>
-  <table><thead><tr><th>id</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;">
+    <a id="new" href="#" style="font-weight:600;font-size:0.9rem;">+ New entry</a>
+    <input id="q" placeholder="Search…" style="max-width:16rem;margin:0;" />
+  </div>
+  <p id="page" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem;"></p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>id</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
   <script>
     import { enbiFetch, escapeHtml } from "../lib/api.ts";
     const name = new URLSearchParams(location.search).get("c") ?? "";
@@ -39,7 +47,12 @@ import Admin from "../layouts/Admin.astro";
       const rows = (await res.json()) as Record<string, unknown>[];
       document.getElementById("page")!.textContent = `${rows.length ? offset + 1 : 0}–${offset + rows.length} of ${total}`;
       document.getElementById("rows")!.innerHTML = rows
-        .map((r) => `<tr><td>${escapeHtml(r.id)}</td><td><a href="/edit?c=${encodeURIComponent(name)}&id=${encodeURIComponent(String(r.id))}">edit</a></td></tr>`)
+        .map((r) =>
+          `<tr>
+            <td>${escapeHtml(r.id)}</td>
+            <td><a href="/edit?c=${encodeURIComponent(name)}&id=${encodeURIComponent(String(r.id))}">edit</a></td>
+          </tr>`,
+        )
         .join("");
     }
     document.getElementById("q")!.addEventListener("input", () => { offset = 0; void load(); });
