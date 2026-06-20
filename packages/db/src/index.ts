@@ -20,6 +20,7 @@ export {
   type SsoProvider,
   type WebhookConfig,
   type WebhookEvent,
+  type WebhookPayload,
 } from "./config.ts";
 export { createDb, type EnbiDatabase, type EnbiDb } from "./connection.ts";
 export { EnbiError, type EnbiErrorCode } from "./errors.ts";

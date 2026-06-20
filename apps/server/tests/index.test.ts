@@ -1542,6 +1542,15 @@ test("webhooks: event filtering — webhook with events:['delete'] does NOT fire
   });
   expect(res.status).toBe(201);
   expect(deliveries).toHaveLength(0);
+
+  // Positive case: a DELETE should fire exactly one delivery with event === "delete".
+  const del = await filteredApp.request("/api/posts/wf1", {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(del.status).toBe(204);
+  expect(deliveries).toHaveLength(1);
+  expect(deliveries[0].payload.event).toBe("delete");
 });
 
 test("webhooks: collection filtering — webhook with collections:['other'] does NOT fire for posts", async () => {
