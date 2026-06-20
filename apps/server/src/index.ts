@@ -25,6 +25,7 @@ import {
 import { errorHandler } from "./errors.ts";
 import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
+import { mountMedia } from "./media.ts";
 import { mountProviders } from "./providers.ts";
 import { authorize } from "./guard.ts";
 
@@ -233,6 +234,7 @@ export async function createServer(
   }
 
   mountKeys(app, ctx, config.roles, auth);
+  mountMedia(app, ctx, config.roles, auth, config);
   mountCollectionsMeta(app, config.roles, auth, config.collections);
   for (const col of config.collections) {
     mountCollection(app, ctx, config.roles, auth, col);
