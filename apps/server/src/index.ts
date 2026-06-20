@@ -27,7 +27,7 @@ import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
 import { mountMedia } from "./media.ts";
 import { mountProviders } from "./providers.ts";
-import { authorize } from "./guard.ts";
+import { authorize, PUBLIC_ROLE } from "./guard.ts";
 
 export type CreateServerOptions = {
   /** Inject an auth provider (tests). Defaults to a better-auth-backed one. */
@@ -67,7 +67,7 @@ function mountCollection(
   const idOf = (row: Row): string => String(row[col.primaryKey]);
 
   app.get(base, async (c) => {
-    await authorize(auth, roles, col, "read", c.req.raw.headers);
+    const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
     const q = c.req.query();
     const reserved = new Set(["limit", "offset", "sort", "_match", "cursor"]);
     const validOps = new Set<FilterOp>(["eq", "ne", "like", "gt", "gte", "lt", "lte", "in"]);
@@ -105,6 +105,10 @@ function mountCollection(
       if (filters.length > 50) {
         throw new EnbiError("validation", "Too many filters (max 50).");
       }
+      // Draft filtering: public callers only see published rows (ADR-0045).
+      if (col.drafts && caller.role === PUBLIC_ROLE) {
+        filters.push({ column: col.drafts.column, op: "eq", value: "published" });
+      }
       const total = await countRows(ctx.db, col.table, filters, match);
       const rows = await listRows(ctx.db, col.table, {
         limit: effectiveLimit,
@@ -137,6 +141,11 @@ function mountCollection(
   app.post(base, async (c) => {
     const caller = await authorize(auth, roles, col, "create", c.req.raw.headers);
     const body = asObject(await c.req.json());
+    // Draft default: if the collection has drafts enabled and no status value was
+    // provided, default the status column to "draft" (ADR-0045).
+    if (col.drafts && body[col.drafts.column] === undefined) {
+      body[col.drafts.column] = "draft";
+    }
     const id = idOf(body);
     if (await getRow(ctx.db, col.table, col.primaryKey, id)) {
       throw new EnbiError("conflict", `${col.name} "${id}" already exists.`);
@@ -147,9 +156,13 @@ function mountCollection(
   });
 
   app.get(`${base}/:id`, async (c) => {
-    await authorize(auth, roles, col, "read", c.req.raw.headers);
+    const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
     const row = await getRow(ctx.db, col.table, col.primaryKey, c.req.param("id"));
     if (!row) throw new EnbiError("not_found", `${col.name} not found.`);
+    // Draft gate: hide non-published rows from public callers (ADR-0045).
+    if (col.drafts && caller.role === PUBLIC_ROLE && row[col.drafts.column] !== "published") {
+      throw new EnbiError("not_found", `${col.name} not found.`);
+    }
     return c.json(row);
   });
 
