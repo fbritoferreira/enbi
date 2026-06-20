@@ -4,6 +4,7 @@ import Admin from "../layouts/Admin.astro";
 <Admin title="Edit — enbi">
   <h1 id="heading">Entry</h1>
   <p id="hist-link" hidden><a id="hist-a" href="#">History</a></p>
+  <button id="publish-toggle" hidden></button>
   <form id="form"></form>
   <button id="del" hidden>Delete</button>
   <p class="error" id="err" hidden></p>
@@ -33,7 +34,12 @@ import Admin from "../layouts/Admin.astro";
 
     const metaRes = await enbiFetch("/api/admin_collections");
     if (metaRes.status !== 401) {
-      type ColMeta = { name: string; primaryKey: string; columns: { name: string }[] };
+      type ColMeta = {
+        name: string;
+        primaryKey: string;
+        columns: { name: string }[];
+        drafts: { column: string } | false;
+      };
       const meta = (await metaRes.json()) as ColMeta[];
       const col = meta.find((m) => m.name === name);
 
@@ -69,6 +75,33 @@ import Admin from "../layouts/Admin.astro";
             showErr(`Save failed (${res.status}).`);
           }
         });
+
+        // Publish/Unpublish toggle — only shown for drafts-enabled collections when editing.
+        const toggleBtn = document.getElementById("publish-toggle") as HTMLButtonElement | null;
+        if (!isNew && col.drafts && toggleBtn) {
+          const statusCol = col.drafts.column;
+          const currentStatus = String(current[statusCol] ?? "draft");
+          const isPublished = currentStatus === "published";
+          toggleBtn.hidden = false;
+          toggleBtn.textContent = isPublished ? "Unpublish" : "Publish";
+          toggleBtn.addEventListener("click", async () => {
+            const nextStatus = isPublished ? "draft" : "published";
+            const body: Record<string, string> = {};
+            for (const c of col.columns) {
+              const input = document.getElementById(`f_${c.name}`) as HTMLInputElement | null;
+              body[c.name] = c.name === statusCol ? nextStatus : (input ? input.value : String(current[c.name] ?? ""));
+            }
+            const res = await enbiFetch(`/api/${name}/${encodeURIComponent(id)}`, {
+              method: "PUT",
+              body: JSON.stringify(body),
+            });
+            if (res.ok) {
+              location.href = `/entries?c=${encodeURIComponent(name)}`;
+            } else {
+              showErr(`Status update failed (${res.status}).`);
+            }
+          });
+        }
 
         const del = document.getElementById("del") as HTMLButtonElement | null;
         if (!isNew && del) {
