@@ -28,4 +28,5 @@ export {
   type RevisionsTable,
   sqliteRevisions,
 } from "./revisions.ts";
+export { mediaFor, type MediaTable, mysqlMedia, pgMedia, sqliteMedia } from "./media.ts";
 export { buildSchema } from "./schema.ts";
