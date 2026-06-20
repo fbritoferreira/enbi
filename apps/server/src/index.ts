@@ -102,6 +102,7 @@ function mountCollection(
     data: unknown,
   ) => void,
   configuredLocales: string[],
+  defaultLocale: string | undefined,
 ): void {
   const base = `/api/${col.name}`;
   const idOf = (row: Row): string => String(row[col.primaryKey]);
@@ -183,7 +184,7 @@ function mountCollection(
         c.header("X-Next-Cursor", String(lastRow[col.primaryKey]));
       }
       let finalRows = rows;
-      if (localeParam !== undefined && col.localized.length > 0) {
+      if (localeParam !== undefined && localeParam !== defaultLocale && col.localized.length > 0) {
         finalRows = await overlayTranslations(
           ctx.db,
           ctx.translations,
@@ -275,7 +276,7 @@ function mountCollection(
           400,
         );
       }
-      if (col.localized.length > 0) {
+      if (col.localized.length > 0 && localeParam !== defaultLocale) {
         const translations = await readTranslations(
           ctx.db,
           ctx.translations,
@@ -481,6 +482,7 @@ export async function createServer(
       config.collections,
       emit,
       config.i18n?.locales ?? [],
+      config.i18n?.defaultLocale,
     );
   }
   return app;

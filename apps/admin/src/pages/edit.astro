@@ -92,6 +92,7 @@ import Admin from "../layouts/Admin.astro";
                   currentTranslations = await tRes.json() as Record<string, string>;
                 } else {
                   currentTranslations = {};
+                  showErr(`Failed to load translations for locale "${activeLocale}" (${tRes.status}).`);
                 }
               } else {
                 currentTranslations = {};
