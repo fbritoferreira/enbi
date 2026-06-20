@@ -60,7 +60,7 @@ export async function readTranslations(
     );
   const out: Record<string, string> = {};
   for (const row of rows as { field: string; value: string | null }[]) {
-    if (row.value !== null && row.value !== undefined) {
+    if (row.value !== null) {
       out[row.field] = row.value;
     }
   }
@@ -93,7 +93,7 @@ export async function writeTranslations(
         ),
       );
     await db.insert(table).values({
-      id: `${collectionName}:${entryId}:${locale}:${field}:${Date.now()}`,
+      id: `${collectionName}:${entryId}:${locale}:${field}`,
       collection: collectionName,
       entryId,
       locale,
@@ -101,5 +101,5 @@ export async function writeTranslations(
       value,
     });
   }
-  return readTranslations(db, table, collectionName, entryId, locale);
+  return await readTranslations(db, table, collectionName, entryId, locale);
 }
