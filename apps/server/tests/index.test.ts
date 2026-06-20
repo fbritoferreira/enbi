@@ -2084,3 +2084,15 @@ test("fix: boolean value with min/max rule is not treated as numeric", () => {
   // The boolean should not be treated as a number → no min/max errors produced.
   expect(errors).toHaveLength(0);
 });
+
+test("collection(): localized defaults to []", () => {
+  const t = sqliteTable("tmp_loc", { id: text("id").primaryKey() });
+  const col = collection(t, { name: "tmp_loc" });
+  expect(col.localized).toEqual([]);
+});
+
+test("collection(): localized is set when provided", () => {
+  const t = sqliteTable("tmp_loc2", { id: text("id").primaryKey(), title: text("title") });
+  const col = collection(t, { name: "tmp_loc2", localized: ["title"] });
+  expect(col.localized).toEqual(["title"]);
+});
