@@ -52,6 +52,8 @@ export type EnbiConfig = {
   collections: AnyCollection[];
   /** Admin UI origin allowed to call the API with credentials (CORS). */
   admin?: { origin?: string };
+  /** Local-disk media store configuration (ADR-0044). */
+  media?: { dir?: string };
 };
 
 /** Identity helper that gives the user full type-checking on their config. */
