@@ -501,6 +501,79 @@ test("richer query: backward compat — plain ?field=value still means eq", asyn
   expect(res.headers.get("X-Total-Count")).toBe("1");
 });
 
+// ── Security / correctness fixes ─────────────────────────────────────────────
+
+test("fix: negative limit clamps to 0 — returns [] but still reports total", async () => {
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','a',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','b',2)`);
+  const res = await app.request("/api/posts?limit=-5", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as unknown[];
+  expect(rows).toEqual([]);
+  expect(res.headers.get("X-Total-Count")).toBe("2");
+});
+
+test("fix: CORS exposeHeaders includes both X-Total-Count and X-Next-Cursor", async () => {
+  const corsCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await corsCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await corsCtx.db.run(sql`CREATE TABLE pages (id text PRIMARY KEY, body text NOT NULL)`);
+  await corsCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await corsCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const withCors = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts", public: ["read"] as const })],
+      admin: { origin: "http://localhost:4321" },
+    },
+    { db: corsCtx, authProvider: stubAuth },
+  );
+  const res = await withCors.request("/api/posts", {
+    headers: { origin: "http://localhost:4321" },
+  });
+  expect(res.status).toBe(200);
+  const expose = res.headers.get("access-control-expose-headers") ?? "";
+  expect(expose).toContain("X-Total-Count");
+  expect(expose).toContain("X-Next-Cursor");
+});
+
+test("fix: cursor without limit defaults to 100 — returns rows, not unbounded", async () => {
+  for (let i = 0; i < 5; i++) {
+    await ctx.db.run(sql.raw(`INSERT INTO posts (id,title,views) VALUES ('p${i}','t${i}',${i})`));
+  }
+  // cursor=p0 without limit → should return the 4 remaining rows (p1..p4), bounded at ≤100
+  const res = await app.request("/api/posts?cursor=p0", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.length).toBeLessThanOrEqual(100);
+  expect(res.headers.get("X-Total-Count")).toBe("5");
+});
+
+test("fix: more than 50 filters returns 400 with 'Too many filters' message", async () => {
+  // Build 51 distinct filter params: a0__eq=x ... a50__eq=x
+  const params = Array.from({ length: 51 }, (_, i) => `a${i}__eq=x`).join("&");
+  const res = await app.request(`/api/posts?${params}`, { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(400);
+  const body = (await res.json()) as { message: string };
+  expect(body.message).toBe("Too many filters (max 50).");
+});
+
+test("fix: in-filter with >100 items returns 400 with correct message", async () => {
+  const items = Array.from({ length: 101 }, (_, i) => `v${i}`).join(",");
+  const res = await app.request(`/api/posts?id__in=${items}`, { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(400);
+  const body = (await res.json()) as { message: string };
+  expect(body.message).toBe("Too many values in 'in' filter (max 100).");
+});
+
 test("GET /api/admin_collections returns metadata, admin-only", async () => {
   const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
   const app = await createServer(

@@ -65,8 +65,13 @@ function filterClause(table: Table, f: ListFilter): SQL {
       return lt(col, f.value);
     case "lte":
       return lte(col, f.value);
-    case "in":
-      return inArray(col, f.value.split(","));
+    case "in": {
+      const items = f.value.split(",");
+      if (items.length > 100) {
+        throw new EnbiError("validation", "Too many values in 'in' filter (max 100).");
+      }
+      return inArray(col, items);
+    }
   }
 }
 

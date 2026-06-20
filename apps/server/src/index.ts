@@ -93,13 +93,19 @@ function mountCollection(
             dir: sortRaw.startsWith("-") ? ("desc" as const) : ("asc" as const),
           }
         : undefined;
-      const limit = q.limit !== undefined ? Math.min(Number(q.limit) || 0, 100) : undefined;
+      const limit =
+        q.limit !== undefined ? Math.max(0, Math.min(Number(q.limit) || 0, 100)) : undefined;
       const offset = q.offset !== undefined ? Number(q.offset) || 0 : undefined;
       const match: "all" | "any" = q._match === "any" ? "any" : "all";
       const cursor = q.cursor;
+      // cursor mode must always be bounded
+      const effectiveLimit = cursor !== undefined && limit === undefined ? 100 : limit;
+      if (filters.length > 50) {
+        throw new EnbiError("validation", "Too many filters (max 50).");
+      }
       const total = await countRows(ctx.db, col.table, filters, match);
       const rows = await listRows(ctx.db, col.table, {
-        limit,
+        limit: effectiveLimit,
         offset,
         sort,
         filters,
@@ -108,7 +114,12 @@ function mountCollection(
         primaryKey: col.primaryKey,
       });
       c.header("X-Total-Count", String(total));
-      if (cursor !== undefined && rows.length > 0 && limit !== undefined && rows.length === limit) {
+      if (
+        cursor !== undefined &&
+        rows.length > 0 &&
+        effectiveLimit !== undefined &&
+        rows.length === effectiveLimit
+      ) {
         const lastRow = rows[rows.length - 1] as Row;
         c.header("X-Next-Cursor", String(lastRow[col.primaryKey]));
       }
@@ -203,7 +214,7 @@ export async function createServer(
         credentials: true,
         allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: ["content-type", "x-api-key", "authorization"],
-        exposeHeaders: ["X-Total-Count"],
+        exposeHeaders: ["X-Total-Count", "X-Next-Cursor"],
       }),
     );
   }
