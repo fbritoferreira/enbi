@@ -10,6 +10,7 @@ import {
   hashApiKey,
 } from "@enbi/auth";
 import { collection, createDb, defineEnbiConfig, type EnbiDb } from "@enbi/db";
+import { overlayTranslations, readTranslations, writeTranslations } from "../src/i18n.ts";
 import { validateFields } from "../src/validate.ts";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -2095,4 +2096,61 @@ test("collection(): localized is set when provided", () => {
   const t = sqliteTable("tmp_loc2", { id: text("id").primaryKey(), title: text("title") });
   const col = collection(t, { name: "tmp_loc2", localized: ["title"] });
   expect(col.localized).toEqual(["title"]);
+});
+
+// ── i18n helpers ──────────────────────────────────────────────────────────
+
+async function buildI18nCtx() {
+  const c = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await c.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY,
+    collection text NOT NULL,
+    entry_id text NOT NULL,
+    locale text NOT NULL,
+    field text NOT NULL,
+    value text
+  )`);
+  return c;
+}
+
+test("readTranslations: returns empty object when no rows exist", async () => {
+  const c = await buildI18nCtx();
+  const result = await readTranslations(c.db, c.translations, "posts", "p1", "fr");
+  expect(result).toEqual({});
+});
+
+test("writeTranslations + readTranslations: round-trip", async () => {
+  const c = await buildI18nCtx();
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Bonjour" });
+  const result = await readTranslations(c.db, c.translations, "posts", "p1", "fr");
+  expect(result).toEqual({ title: "Bonjour" });
+});
+
+test("writeTranslations: upsert replaces existing value", async () => {
+  const c = await buildI18nCtx();
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Bonjour" });
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Salut" });
+  const result = await readTranslations(c.db, c.translations, "posts", "p1", "fr");
+  expect(result.title).toBe("Salut");
+});
+
+test("overlayTranslations: overlays translated fields on rows", async () => {
+  const c = await buildI18nCtx();
+  await writeTranslations(c.db, c.translations, "posts", "p1", "fr", { title: "Bonjour" });
+  const rows = [{ id: "p1", title: "Hello", body: "World" }];
+  const overlaid = await overlayTranslations(c.db, c.translations, rows, "posts", "fr", [
+    "title",
+    "body",
+  ]);
+  expect(overlaid[0]).toMatchObject({ id: "p1", title: "Bonjour", body: "World" });
+});
+
+test("overlayTranslations: falls back to base value when no translation", async () => {
+  const c = await buildI18nCtx();
+  const rows = [{ id: "p1", title: "Hello", body: "World" }];
+  const overlaid = await overlayTranslations(c.db, c.translations, rows, "posts", "de", [
+    "title",
+    "body",
+  ]);
+  expect(overlaid[0]).toMatchObject({ title: "Hello", body: "World" });
 });
