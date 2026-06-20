@@ -37,8 +37,9 @@ import Admin from "../layouts/Admin.astro";
       type ColMeta = {
         name: string;
         primaryKey: string;
-        columns: { name: string }[];
+        columns: { name: string; type: string }[];
         drafts: { column: string } | false;
+        relations: Record<string, { collection: string }>;
       };
       const meta = (await metaRes.json()) as ColMeta[];
       const col = meta.find((m) => m.name === name);
@@ -52,12 +53,35 @@ import Admin from "../layouts/Admin.astro";
           if (r.ok) current = await r.json() as Record<string, unknown>;
         }
 
-        form.innerHTML = col.columns
-          .map(
-            (c) =>
-              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${!isNew && c.name === col.primaryKey ? "readonly" : ""} />`,
-          )
-          .join("") + `<button type="submit">Save</button>`;
+        const parts: string[] = [];
+        for (const c of col.columns) {
+          const isRelation = Boolean(col.relations[c.name]);
+          const isPk = c.name === col.primaryKey;
+          if (isRelation && !isPk) {
+            const targetName = col.relations[c.name].collection;
+            let opts = `<option value="">-- none --</option>`;
+            try {
+              const tr = await enbiFetch(`/api/${encodeURIComponent(targetName)}?limit=100`);
+              if (tr.ok) {
+                const entries = (await tr.json()) as Record<string, unknown>[];
+                for (const entry of entries) {
+                  const idVal = escapeHtml(String(entry[Object.keys(entry)[0]] ?? ""));
+                  const labelVal = escapeHtml(String((entry as Record<string, unknown>).title ?? Object.values(entry as Record<string, unknown>)[0] ?? ""));
+                  const sel = String(current[c.name] ?? "") === String(entry[Object.keys(entry)[0]] ?? "") ? " selected" : "";
+                  opts += `<option value="${idVal}"${sel}>${labelVal}</option>`;
+                }
+              }
+            } catch { /* leave as empty select on network error */ }
+            parts.push(
+              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><select id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}">${opts}</select>`,
+            );
+          } else {
+            parts.push(
+              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${isPk && !isNew ? "readonly" : ""} />`,
+            );
+          }
+        }
+        form.innerHTML = parts.join("") + `<button type="submit">Save</button>`;
 
         form.addEventListener("submit", async (e) => {
           e.preventDefault();
