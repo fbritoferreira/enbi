@@ -148,8 +148,9 @@ function mountCollection(
     const caller = await authorize(auth, roles, col, "create", c.req.raw.headers);
     const body = asObject(await c.req.json());
     // Draft default: if the collection has drafts enabled and no status value was
-    // provided, default the status column to "draft" (ADR-0045).
-    if (col.drafts && body[col.drafts.column] === undefined) {
+    // provided (or an explicit null was sent), default the status column to "draft"
+    // (ADR-0045). Using == null covers both undefined and null.
+    if (col.drafts && body[col.drafts.column] == null) {
       body[col.drafts.column] = "draft";
     }
     const id = idOf(body);

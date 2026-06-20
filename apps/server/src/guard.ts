@@ -24,7 +24,7 @@ export async function authorizeResource(
   headers: Headers,
   options?: CanOptions,
 ): Promise<Caller> {
-  const identity = await authProvider.authenticate(headers);
+  const identity = await authProvider.authenticate(headers).catch(() => null);
   const role = identity?.role ?? PUBLIC_ROLE;
   if (!can(roles, role, resource, action, options)) {
     if (!identity) throw new EnbiError("unauthorized", "Authentication required.");
@@ -43,7 +43,9 @@ export async function authorize(
   if (isPublicAction(collection.public, action)) {
     // Even on public actions, identify the caller so draft filtering knows
     // whether they are truly anonymous or an authenticated admin (ADR-0045).
-    const identity = await authProvider.authenticate(headers);
+    // A failing auth provider is treated as anonymous (no identity) so public
+    // reads remain available even when the provider is temporarily unavailable.
+    const identity = await authProvider.authenticate(headers).catch(() => null);
     return { userId: identity?.userId ?? null, role: identity?.role ?? PUBLIC_ROLE };
   }
   return authorizeResource(authProvider, roles, collection.permissionsKey, action, headers);

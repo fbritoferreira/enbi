@@ -67,8 +67,8 @@ field in each collection's metadata payload. On the `edit.astro` admin page, whe
 `col.drafts` is truthy and the entry is not new, a "Publish" / "Unpublish" toggle
 button is rendered. Clicking the button reads the current form values, overrides
 the status column with the next state (`"published"` or `"draft"`), and PUTs the
-full entry. On success the page navigates back to the entries list. All interpolated
-values are passed through `escapeHtml`.
+full entry. On success the page navigates back to the entries list. All values are
+set via `.textContent` (safe DOM assignment — no raw HTML interpolation).
 
 ## Consequences
 
@@ -86,3 +86,6 @@ values are passed through `escapeHtml`.
   `archived`).
 - **Non-goal:** server-side validation that the status column exists in the
   table schema (runtime contract only).
+- **Non-goal:** blocking revision snapshots of a published entry from containing
+  historical draft content — a snapshot records the row as it existed at the time
+  of the write, regardless of the status value at that moment.
