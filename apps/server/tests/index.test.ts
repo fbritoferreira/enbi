@@ -2328,3 +2328,78 @@ test("i18n: PUT translations for unconfigured locale → 400", async () => {
   });
   expect(res.status).toBe(400);
 });
+
+// ── Security: draft-leak via translations read endpoint ───────────────────────
+
+const draftLocalizedPosts = sqliteTable("draft_localized_posts", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: text("status").notNull(),
+});
+
+async function buildDraftI18nApp() {
+  const dlCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await dlCtx.db.run(
+    sql`CREATE TABLE draft_localized_posts (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await dlCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await dlCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await dlCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  await dlCtx.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    locale text NOT NULL, field text NOT NULL, value text)`);
+
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" },
+    collections: [
+      collection(draftLocalizedPosts, {
+        name: "draft_localized_posts",
+        drafts: { column: "status" },
+        localized: ["title"],
+        public: ["read"] as const,
+      }),
+    ],
+    i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+  });
+
+  const authProvider = composeProviders(apiKeyProvider(dlCtx.db, dlCtx.apiKeys), stubAuth);
+  const dlApp = await createServer(config, { db: dlCtx, authProvider });
+  return { dlApp, dlCtx };
+}
+
+test("security: GET translations/:locale of a DRAFT entry returns 404 to public; admin gets 200 with data", async () => {
+  const { dlApp, dlCtx } = await buildDraftI18nApp();
+
+  // Insert a DRAFT entry.
+  await dlCtx.db.run(
+    sql`INSERT INTO draft_localized_posts (id, title, status) VALUES ('d1', 'Draft title', 'draft')`,
+  );
+
+  // Set a French translation as admin so there IS data to potentially leak.
+  const put = await dlApp.request("/api/draft_localized_posts/d1/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Titre brouillon" }),
+  });
+  expect(put.status).toBe(200);
+
+  // Public caller (no x-role) → must get 404, not the translations.
+  const pubGet = await dlApp.request("/api/draft_localized_posts/d1/translations/fr");
+  expect(pubGet.status).toBe(404);
+
+  // Admin caller (x-role: admin) → 200 with the stored translation.
+  const admGet = await dlApp.request("/api/draft_localized_posts/d1/translations/fr", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admGet.status).toBe(200);
+  const data = (await admGet.json()) as Record<string, string>;
+  expect(data.title).toBe("Titre brouillon");
+});

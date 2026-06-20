@@ -395,7 +395,7 @@ function mountCollection(
 
   // GET /api/:col/:id/translations/:locale — read stored translations
   app.get(`${base}/:id/translations/:locale`, async (c) => {
-    await authorize(auth, roles, col, "read", c.req.raw.headers);
+    const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
     const id = c.req.param("id");
     const locale = c.req.param("locale");
     if (!configuredLocales.includes(locale)) {
@@ -403,6 +403,10 @@ function mountCollection(
     }
     const existing = await getRow(ctx.db, col.table, col.primaryKey, id);
     if (!existing) throw new EnbiError("not_found", `${col.name} not found.`);
+    // Draft gate: public callers must not read translations of a non-published entry (ADR-0045).
+    if (col.drafts && caller.role === PUBLIC_ROLE && existing[col.drafts.column] !== "published") {
+      throw new EnbiError("not_found", `${col.name} not found.`);
+    }
     const translations = await readTranslations(ctx.db, ctx.translations, col.name, id, locale);
     return c.json(translations);
   });
