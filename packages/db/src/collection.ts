@@ -10,6 +10,32 @@ import { EnbiError } from "./errors.ts";
  */
 export type PublicAccess = boolean | readonly PermissionAction[];
 
+/**
+ * Per-field validation rule for a collection (ADR-0049).
+ * All fields are optional; absent rules mean "no constraint".
+ */
+export type FieldRule = {
+  /** Field must be present and non-null/undefined/empty-string. */
+  required?: boolean;
+  /**
+   * Expected value type.
+   * - "string" → typeof === "string"
+   * - "number" → Number.isFinite(Number(v)) (accepts numeric strings)
+   * - "boolean" → strict true/false
+   * - "email" → basic email regex
+   * - "url" → parseable by new URL()
+   */
+  type?: "string" | "number" | "boolean" | "email" | "url";
+  /** For strings: minimum length; for numbers: minimum value. */
+  min?: number;
+  /** For strings: maximum length; for numbers: maximum value. */
+  max?: number;
+  /** Regex source string tested against the string value of the field. */
+  pattern?: string;
+  /** Allowed values (compared as strings). */
+  enum?: string[];
+};
+
 export type CollectionOptions = {
   /** URL segment + storage key for this collection, e.g. "posts". */
   name: string;
@@ -34,6 +60,12 @@ export type CollectionOptions = {
    * collection. Used by the server's `?expand` query parameter.
    */
   relations?: Record<string, { collection: string }>;
+  /**
+   * Per-field validation rules applied on create and update (ADR-0049).
+   * Keys are field names; values are FieldRule objects.
+   * Defaults to {} (no validation).
+   */
+  validate?: Record<string, FieldRule>;
 };
 
 export type Collection<T extends Table = Table> = {
@@ -56,6 +88,11 @@ export type Collection<T extends Table = Table> = {
    * the column holding the target row's PK; values name the target collection.
    */
   relations: Record<string, { collection: string }>;
+  /**
+   * Per-field validation rules applied on create and update (ADR-0049).
+   * Defaults to {} (no validation).
+   */
+  validate: Record<string, FieldRule>;
 };
 
 export type AnyCollection = Collection;
@@ -97,6 +134,7 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     primaryKey: resolvePrimaryKey(options.name, table),
     drafts: normalizeDrafts(options.drafts),
     relations: options.relations ?? {},
+    validate: options.validate ?? {},
   };
 }
 

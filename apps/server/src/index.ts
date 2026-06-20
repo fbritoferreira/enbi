@@ -22,7 +22,8 @@ import {
   type Row,
   updateRow,
 } from "./crud.ts";
-import { errorHandler } from "./errors.ts";
+import { errorHandler, ValidationError } from "./errors.ts";
+import { validateFields } from "./validate.ts";
 import { mountCollectionsMeta } from "./collections.ts";
 import { mountKeys } from "./keys.ts";
 import { mountMedia } from "./media.ts";
@@ -220,6 +221,13 @@ function mountCollection(
     if (col.drafts && body[col.drafts.column] == null) {
       body[col.drafts.column] = "draft";
     }
+    // Field validation (ADR-0049): run before duplicate-id check or DB insert.
+    if (Object.keys(col.validate).length > 0) {
+      const errs = validateFields(col.validate, body);
+      if (errs.length > 0) {
+        throw new ValidationError("Validation failed.", errs);
+      }
+    }
     const id = idOf(body);
     if (await getRow(ctx.db, col.table, col.primaryKey, id)) {
       throw new EnbiError("conflict", `${col.name} "${id}" already exists.`);
@@ -281,7 +289,17 @@ function mountCollection(
     const id = c.req.param("id");
     const existing = await getRow(ctx.db, col.table, col.primaryKey, id);
     if (!existing) throw new EnbiError("not_found", `${col.name} not found.`);
-    await updateRow(ctx.db, col.table, col.primaryKey, id, asObject(await c.req.json()));
+    const updateBody = asObject(await c.req.json());
+    // Field validation (ADR-0049): PUT is treated as a full-replace — validate
+    // the provided fields plus required rules. Required fields that are absent
+    // from the PUT body will trigger a required error.
+    if (Object.keys(col.validate).length > 0) {
+      const errs = validateFields(col.validate, updateBody);
+      if (errs.length > 0) {
+        throw new ValidationError("Validation failed.", errs);
+      }
+    }
+    await updateRow(ctx.db, col.table, col.primaryKey, id, updateBody);
     await snapshot(ctx, col, id, caller.userId);
     const updated = await getRow(ctx.db, col.table, col.primaryKey, id);
     emit("update", col.name, id, updated);

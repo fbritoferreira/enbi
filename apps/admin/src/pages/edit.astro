@@ -34,12 +34,14 @@ import Admin from "../layouts/Admin.astro";
 
     const metaRes = await enbiFetch("/api/admin_collections");
     if (metaRes.status !== 401) {
+      type FieldRule = { required?: boolean; [key: string]: unknown };
       type ColMeta = {
         name: string;
         primaryKey: string;
         columns: { name: string; type: string }[];
         drafts: { column: string } | false;
         relations: Record<string, { collection: string }>;
+        validate: Record<string, FieldRule>;
       };
       const meta = (await metaRes.json()) as ColMeta[];
       const col = meta.find((m) => m.name === name);
@@ -57,6 +59,8 @@ import Admin from "../layouts/Admin.astro";
         for (const c of col.columns) {
           const isRelation = Boolean(col.relations[c.name]);
           const isPk = c.name === col.primaryKey;
+          const isRequired = Boolean(col.validate[c.name]?.required);
+          const labelText = escapeHtml(c.name) + (isRequired ? " *" : "");
           if (isRelation && !isPk) {
             const targetName = col.relations[c.name].collection;
             let opts = `<option value="">-- none --</option>`;
@@ -74,11 +78,11 @@ import Admin from "../layouts/Admin.astro";
               }
             } catch { /* leave as empty select on network error */ }
             parts.push(
-              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><select id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}">${opts}</select>`,
+              `<label for="f_${escapeHtml(c.name)}">${labelText}</label><select id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}">${opts}</select>`,
             );
           } else {
             parts.push(
-              `<label for="f_${escapeHtml(c.name)}">${escapeHtml(c.name)}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${isPk && !isNew ? "readonly" : ""} />`,
+              `<label for="f_${escapeHtml(c.name)}">${labelText}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${isPk && !isNew ? "readonly" : ""} />`,
             );
           }
         }
