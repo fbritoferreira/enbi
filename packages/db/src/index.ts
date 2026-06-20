@@ -18,6 +18,8 @@ export {
   type PermissionAction,
   type RolePermission,
   type SsoProvider,
+  type WebhookConfig,
+  type WebhookEvent,
 } from "./config.ts";
 export { createDb, type EnbiDatabase, type EnbiDb } from "./connection.ts";
 export { EnbiError, type EnbiErrorCode } from "./errors.ts";

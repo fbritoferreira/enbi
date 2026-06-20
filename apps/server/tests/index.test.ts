@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
@@ -13,6 +14,7 @@ import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { createServer } from "../src/index.ts";
+import type { WebhookDelivery } from "../src/webhooks.ts";
 
 const posts = sqliteTable("posts", {
   id: text("id").primaryKey(),
@@ -1390,4 +1392,274 @@ test("security: public caller expanding a draft target row gets null; admin gets
     name: "Draft Author",
     status: "draft",
   });
+});
+
+// ── Webhooks (ADR-0047) ───────────────────────────────────────────────────────
+
+async function buildWebhookApp(webhookCtx: EnbiDb, deliveries: WebhookDelivery[]) {
+  return createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/a", secret: "s3cret" }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+}
+
+test("webhooks: POST fires a create delivery with correct shape", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const webhookApp = await buildWebhookApp(webhookCtx, deliveries);
+
+  const res = await webhookApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "w1", title: "Webhook test", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.url).toBe("https://hook.test/a");
+  expect(d.payload.event).toBe("create");
+  expect(d.payload.collection).toBe("posts");
+  expect(d.payload.id).toBe("w1");
+  expect((d.payload.data as Record<string, unknown>).id).toBe("w1");
+  expect((d.payload.data as Record<string, unknown>).title).toBe("Webhook test");
+  expect(d.signature).toBeDefined();
+  expect(d.signature!.startsWith("sha256=")).toBe(true);
+});
+
+test("webhooks: PUT fires an update delivery", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await webhookCtx.db.run(sql`INSERT INTO posts VALUES ('w2','Original',0)`);
+
+  const deliveries: WebhookDelivery[] = [];
+  const webhookApp = await buildWebhookApp(webhookCtx, deliveries);
+
+  const res = await webhookApp.request("/api/posts/w2", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Updated", views: 5 }),
+  });
+  expect(res.status).toBe(200);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.payload.event).toBe("update");
+  expect(d.payload.collection).toBe("posts");
+  expect(d.payload.id).toBe("w2");
+});
+
+test("webhooks: DELETE fires a delete delivery with data:{id}", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+  await webhookCtx.db.run(sql`INSERT INTO posts VALUES ('w3','To delete',0)`);
+
+  const deliveries: WebhookDelivery[] = [];
+  const webhookApp = await buildWebhookApp(webhookCtx, deliveries);
+
+  const res = await webhookApp.request("/api/posts/w3", {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(204);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.payload.event).toBe("delete");
+  expect(d.payload.collection).toBe("posts");
+  expect(d.payload.id).toBe("w3");
+  expect(d.payload.data).toEqual({ id: "w3" });
+});
+
+test("webhooks: event filtering — webhook with events:['delete'] does NOT fire on create", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const filteredApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/delete-only", events: ["delete"] }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await filteredApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wf1", title: "Filter test", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(0);
+});
+
+test("webhooks: collection filtering — webhook with collections:['other'] does NOT fire for posts", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const filteredApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/other-only", collections: ["other"] }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await filteredApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wc1", title: "Collection filter", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(0);
+});
+
+test("webhooks: no secret → delivery has no signature", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const deliveries: WebhookDelivery[] = [];
+  const noSecretApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/no-secret" }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await noSecretApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wns1", title: "No secret", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(1);
+  expect(deliveries[0].signature).toBeUndefined();
+});
+
+test("webhooks: signature equals independently-computed HMAC-SHA256 of JSON.stringify(payload)", async () => {
+  const webhookCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await webhookCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await webhookCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  const secret = "verify-secret";
+  const deliveries: WebhookDelivery[] = [];
+  const verifyApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+      webhooks: [{ url: "https://hook.test/verify", secret }],
+    },
+    {
+      db: webhookCtx,
+      authProvider: stubAuth,
+      webhookSink: (d) => deliveries.push(d),
+    },
+  );
+
+  const res = await verifyApp.request("/api/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ id: "wv1", title: "Verify sig", views: 0 }),
+  });
+  expect(res.status).toBe(201);
+  expect(deliveries).toHaveLength(1);
+
+  const [d] = deliveries;
+  expect(d.signature).toBeDefined();
+
+  // Independently compute the expected HMAC-SHA256.
+  const expectedHex = createHmac("sha256", secret).update(JSON.stringify(d.payload)).digest("hex");
+  expect(d.signature).toBe(`sha256=${expectedHex}`);
 });
