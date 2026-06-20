@@ -1,47 +1,29 @@
 ---
 import Admin from "../layouts/Admin.astro";
 ---
-<Admin title="Revisions — enbi">
+<Admin title="Revisions — enbi" active="/">
   <h1 id="heading">Revision history</h1>
   <p class="error" id="err" hidden></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Version</th>
-        <th>Created at</th>
-        <th>Author</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Version</th><th>Created at</th><th>Author</th><th></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
   <script>
     import { enbiFetch, escapeHtml } from "../lib/api.ts";
-
     const sp = new URLSearchParams(location.search);
     const c = sp.get("c") ?? "";
     const id = sp.get("id") ?? "";
-
     const headingEl = document.getElementById("heading");
     if (headingEl) headingEl.textContent = `Revision history — ${c}/${id}`;
-
     const rowsEl = document.getElementById("rows");
     const errEl = document.getElementById("err");
+    const showErr = (m: string) => { if (errEl) { errEl.hidden = false; errEl.textContent = m; } };
 
-    const showErr = (m: string) => {
-      if (errEl) { errEl.hidden = false; errEl.textContent = m; }
-    };
-
-    type Revision = {
-      id: string;
-      collection: string;
-      entryId: string;
-      version: number;
-      snapshot: unknown;
-      authorId: string | null;
-      createdAt: string;
-    };
-
+    type Revision = { id: string; collection: string; entryId: string; version: number; snapshot: unknown; authorId: string | null; createdAt: string };
     const res = await enbiFetch(`/api/${encodeURIComponent(c)}/${encodeURIComponent(id)}/revisions`);
     if (res.status === 401) {
       location.href = "/login";
@@ -49,20 +31,16 @@ import Admin from "../layouts/Admin.astro";
       showErr(`Failed to load revisions (${res.status}).`);
     } else {
       const revisions = (await res.json()) as Revision[];
-
       if (rowsEl) {
         rowsEl.innerHTML = revisions
-          .map(
-            (r) =>
-              `<tr>
-                <td>${escapeHtml(r.version)}</td>
-                <td>${escapeHtml(r.createdAt)}</td>
-                <td>${escapeHtml(r.authorId ?? "")}</td>
-                <td><button data-version="${escapeHtml(r.version)}">Restore</button></td>
-              </tr>`,
-          )
+          .map((r) =>
+            `<tr>
+              <td>${escapeHtml(r.version)}</td>
+              <td style="font-family:var(--font-body);font-size:0.85rem;color:var(--muted);">${escapeHtml(r.createdAt)}</td>
+              <td style="font-family:var(--font-body);font-size:0.85rem;color:var(--muted);">${escapeHtml(r.authorId ?? "")}</td>
+              <td><button data-version="${escapeHtml(r.version)}" style="margin:0;padding:0.3rem 0.6rem;font-size:0.8rem;">Restore</button></td>
+            </tr>`)
           .join("");
-
         rowsEl.querySelectorAll<HTMLButtonElement>("button").forEach((btn) => {
           btn.addEventListener("click", async () => {
             const version = Number(btn.dataset.version);
@@ -71,11 +49,8 @@ import Admin from "../layouts/Admin.astro";
               body: JSON.stringify({ version }),
             });
             if (restoreRes.status === 401) { location.href = "/login"; return; }
-            if (restoreRes.ok) {
-              location.href = `/edit?c=${encodeURIComponent(c)}&id=${encodeURIComponent(id)}`;
-            } else {
-              showErr(`Restore failed (${restoreRes.status}).`);
-            }
+            if (restoreRes.ok) { location.href = `/edit?c=${encodeURIComponent(c)}&id=${encodeURIComponent(id)}`; }
+            else { showErr(`Restore failed (${restoreRes.status}).`); }
           });
         });
       }
