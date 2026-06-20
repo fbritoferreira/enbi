@@ -1,5 +1,14 @@
 # @enbi/cli
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [[`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5), [`84f8bcb`](https://github.com/fbritoferreira/enbi/commit/84f8bcb60aba70582cfcb5ef568a845c643ea65f), [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5)]:
+  - @enbi/server@0.7.0
+  - @enbi/db@0.7.0
+  - @enbi/auth@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes

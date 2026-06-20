@@ -1,5 +1,17 @@
 # @enbi/admin
 
+## 0.7.0
+
+### Minor Changes
+
+- [#30](https://github.com/fbritoferreira/enbi/pull/30) [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - The admin gains a public `/api/admin_providers` endpoint listing configured OAuth and SSO provider ids for the login page's sign-in buttons; a `/users` page for viewing and updating user roles via the better-auth admin plugin; a `/revisions` page for browsing snapshot history and restoring previous versions; and richer `__like`-based entries search that filters on the collection's title column rather than requiring an exact id match.
+
+- [#30](https://github.com/fbritoferreira/enbi/pull/30) [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add draft/publish support: per-collection opt-in via `CollectionOptions.drafts`; public callers see only `status="published"` rows; POST defaults new entries to `"draft"`; admin edit page shows a Publish/Unpublish toggle.
+
+- [#30](https://github.com/fbritoferreira/enbi/pull/30) [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add local-disk media uploads: a `_media` table (included in migrations), a `MediaStore` interface with `diskStore` implementation, four server routes (`POST/GET/DELETE /api/admin_media`, public `GET /api/media/:id`), and an admin `/media` page with upload form and file list.
+
+- [#30](https://github.com/fbritoferreira/enbi/pull/30) [`bac4594`](https://github.com/fbritoferreira/enbi/commit/bac4594c35d44fe37567f3d24038dab38c2283d5) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - Add relations between collections: declare FK field → target collection via `CollectionOptions.relations`; opt-in `?expand=field` expansion nests the target row under `_expanded[field]`; null on missing FK; admin select widget for relation fields.
+
 ## 0.6.0
 
 ### Minor Changes
