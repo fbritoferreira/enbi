@@ -47,6 +47,14 @@ export type EnbiAuthConfig = {
 
 export type WebhookEvent = "create" | "update" | "delete";
 
+export type WebhookPayload = {
+  event: WebhookEvent;
+  collection: string;
+  id: string;
+  data: unknown;
+  timestamp: string;
+};
+
 export type WebhookConfig = {
   url: string;
   /** Events that trigger delivery. Defaults to all three. */

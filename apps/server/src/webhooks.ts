@@ -1,15 +1,9 @@
 // @enbi/server — outbound webhook emitter (ADR-0047).
 // Fire-and-forget delivery: never throws into the request path.
 import { createHmac } from "node:crypto";
-import type { WebhookConfig, WebhookEvent } from "@enbi/db";
+import type { WebhookConfig, WebhookEvent, WebhookPayload } from "@enbi/db";
 
-export type WebhookPayload = {
-  event: WebhookEvent;
-  collection: string;
-  id: string;
-  data: unknown;
-  timestamp: string;
-};
+export type { WebhookPayload };
 
 export type WebhookDelivery = {
   url: string;
@@ -36,8 +30,16 @@ export const defaultWebhookSink: WebhookSink = (delivery) => {
     method: "POST",
     headers,
     body: JSON.stringify(delivery.payload),
+    signal: AbortSignal.timeout(5000),
   }).catch((e: unknown) => {
-    console.warn("[enbi:webhooks] delivery failed", delivery.url, e);
+    let safe: string;
+    try {
+      const u = new URL(delivery.url);
+      safe = u.origin + u.pathname;
+    } catch {
+      safe = "the webhook URL";
+    }
+    console.warn("[enbi:webhooks] delivery failed", safe, e);
   });
 };
 
