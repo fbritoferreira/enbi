@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import {
   apiKeyProvider,
   type AuthProvider,
@@ -8,7 +11,7 @@ import {
 import { collection, createDb, defineEnbiConfig, type EnbiDb } from "@enbi/db";
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { beforeEach, expect, test } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { createServer } from "../src/index.ts";
 
 const posts = sqliteTable("posts", {
@@ -63,6 +66,9 @@ beforeEach(async () => {
   await ctx.db.run(sql`CREATE TABLE _api_keys (
     id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
     label text, created_at text NOT NULL, last_used_at text)`);
+  await ctx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
   app = await buildApp(ctx);
 });
 
@@ -674,4 +680,135 @@ test("GET /api/admin_collections returns metadata, admin-only", async () => {
   // viewer (read shorthand) is NOT admin → 403
   const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
   expect(denied.status).toBe(403);
+});
+
+// ── Media tests ──────────────────────────────────────────────────────────────
+
+let mediaDir: string;
+
+beforeEach(() => {
+  mediaDir = mkdtempSync(joinPath(tmpdir(), "enbi-media-"));
+});
+
+afterEach(() => {
+  rmSync(mediaDir, { recursive: true, force: true });
+});
+
+async function buildMediaApp(ctx: EnbiDb) {
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" },
+    collections: [],
+    media: { dir: mediaDir },
+  });
+  return createServer(config, { db: ctx, authProvider: stubAuth });
+}
+
+test("media: anonymous POST → 401", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const form = new FormData();
+  form.append("file", new Blob(["hello"], { type: "text/plain" }), "test.txt");
+  const res = await app.request("/api/admin_media", { method: "POST", body: form });
+  expect(res.status).toBe(401);
+});
+
+test("media: roundtrip — upload, list, serve, delete", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  // Upload
+  const form = new FormData();
+  form.append("file", new Blob(["hello world"], { type: "text/plain" }), "hello.txt");
+  const upload = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(upload.status).toBe(201);
+  const { id, url, filename, mime } = (await upload.json()) as {
+    id: string;
+    url: string;
+    filename: string;
+    mime: string;
+    size: number;
+  };
+  expect(id).toBeTruthy();
+  expect(url).toBe(`/api/media/${id}`);
+  expect(filename).toBe("hello.txt");
+  expect(mime).toBe("text/plain");
+
+  // List
+  const list = await app.request("/api/admin_media", { headers: { "x-role": "admin" } });
+  expect(list.status).toBe(200);
+  const rows = (await list.json()) as { id: string }[];
+  expect(rows.some((r) => r.id === id)).toBe(true);
+
+  // Serve (public — no auth header)
+  const serve = await app.request(`/api/media/${id}`);
+  expect(serve.status).toBe(200);
+  expect(serve.headers.get("content-type")).toBe("text/plain");
+  expect(await serve.text()).toBe("hello world");
+
+  // Delete
+  const del = await app.request(`/api/admin_media/${id}`, {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(del.status).toBe(204);
+
+  // Serve after delete → 404
+  const gone = await app.request(`/api/media/${id}`);
+  expect(gone.status).toBe(404);
+});
+
+test("media: POST without file → 400", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const form = new FormData();
+  // no file field
+  const res = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(422);
+});
+
+test("media: DELETE non-existent → 404", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const res = await app.request("/api/admin_media/does-not-exist", {
+    method: "DELETE",
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(404);
 });
