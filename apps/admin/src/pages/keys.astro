@@ -1,17 +1,22 @@
 ---
 import Admin from "../layouts/Admin.astro";
 ---
-<Admin title="API keys — enbi">
+<Admin title="API keys — enbi" active="/keys">
   <h1>API keys</h1>
-  <form id="create">
+  <form id="create" style="margin-bottom:2rem;">
     <label for="role">Role</label>
-    <input id="role" value="admin" />
+    <input id="role" value="admin" style="max-width:16rem;" />
     <label for="label">Label</label>
-    <input id="label" />
+    <input id="label" style="max-width:16rem;" />
     <button type="submit">Create key</button>
   </form>
-  <p id="new"></p>
-  <table><thead><tr><th>id</th><th>role</th><th>label</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  <p id="new" style="font-family:var(--font-mono);font-size:0.85rem;color:var(--ok);margin-bottom:1rem;"></p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>id</th><th>role</th><th>label</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
   <script>
     import { enbiFetch, escapeHtml } from "../lib/api.ts";
     const rowsEl = document.getElementById("rows");
@@ -21,7 +26,13 @@ import Admin from "../layouts/Admin.astro";
       const keys = (await res.json()) as { id: string; role: string; label: string | null }[];
       if (rowsEl) {
         rowsEl.innerHTML = keys
-          .map((k) => `<tr><td>${escapeHtml(k.id)}</td><td>${escapeHtml(k.role)}</td><td>${escapeHtml(k.label ?? "")}</td><td><button data-id="${escapeHtml(k.id)}">revoke</button></td></tr>`)
+          .map((k) =>
+            `<tr>
+              <td>${escapeHtml(k.id)}</td>
+              <td>${escapeHtml(k.role)}</td>
+              <td>${escapeHtml(k.label ?? "")}</td>
+              <td><button data-id="${escapeHtml(k.id)}" style="margin:0;padding:0.25rem 0.6rem;font-size:0.8rem;color:var(--danger);border-color:var(--danger);">revoke</button></td>
+            </tr>`)
           .join("");
         rowsEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
           b.addEventListener("click", async () => {

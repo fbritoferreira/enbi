@@ -71,6 +71,12 @@ export type CollectionOptions = {
    * Defaults to [] (no fields are translatable).
    */
   localized?: string[];
+  /**
+   * Admin editor widget overrides: maps field name → widget type. The admin UI
+   * renders a rich-text editor for fields whose widget is "wysiwyg", and a plain
+   * text input for "text". Fields not listed use the default widget for their type.
+   */
+  widgets?: Record<string, "wysiwyg" | "text">;
 };
 
 export type Collection<T extends Table = Table> = {
@@ -103,6 +109,13 @@ export type Collection<T extends Table = Table> = {
    * Defaults to [].
    */
   localized: string[];
+  /**
+   * Admin editor widget overrides: maps field name → widget type. The admin UI
+   * renders a rich-text editor for fields whose widget is "wysiwyg", and a plain
+   * text input for "text". Fields not listed use the default widget for their type.
+   * Defaults to {} (no overrides).
+   */
+  widgets: Record<string, string>;
 };
 
 export type AnyCollection = Collection;
@@ -146,6 +159,7 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     relations: options.relations ?? {},
     validate: options.validate ?? {},
     localized: options.localized ?? [],
+    widgets: options.widgets ?? {},
   };
 }
 

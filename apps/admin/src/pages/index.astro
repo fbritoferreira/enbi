@@ -1,18 +1,39 @@
 ---
 import Admin from "../layouts/Admin.astro";
 ---
-<Admin title="Collections — enbi">
+<Admin title="Collections — enbi" active="/">
   <h1>Collections</h1>
-  <ul id="list"><li>Loading…</li></ul>
+  <ul id="list" style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.35rem;">
+    <li style="color:var(--muted);font-size:0.9rem;">Loading…</li>
+  </ul>
   <script>
-    import { enbiFetch } from "../lib/api.ts";
+    import { enbiFetch, escapeHtml } from "../lib/api.ts";
+
+    // First-run check.
+    try {
+      const sr = await enbiFetch("/api/admin_setup");
+      if (sr.ok) {
+        const { needsSetup } = await sr.json() as { needsSetup: boolean };
+        if (needsSetup) { window.location.href = "/register"; }
+      }
+    } catch { /* continue */ }
+
     const ul = document.getElementById("list")!;
     const res = await enbiFetch("/api/admin_collections");
     if (res.status === 401) { window.location.href = "/login"; }
     else if (!res.ok) { ul.innerHTML = `<li class="error">Failed (${res.status})</li>`; }
     else {
       const cols = (await res.json()) as { name: string; title: string | null }[];
-      ul.innerHTML = cols.map((c) => `<li><a href="/entries?c=${encodeURIComponent(c.name)}">${c.name}</a></li>`).join("") || "<li>No collections.</li>";
+      ul.innerHTML = cols
+        .map((c) =>
+          `<li style="animation:fadeUp 0.2s ease both">
+            <a href="/entries?c=${encodeURIComponent(c.name)}"
+               style="font-family:var(--font-mono);font-size:0.9rem;color:var(--ink);display:inline-flex;align-items:center;gap:0.4rem;">
+              ${escapeHtml(c.name)}
+            </a>
+           </li>`,
+        )
+        .join("") || `<li style="color:var(--muted);font-size:0.9rem;">No collections.</li>`;
     }
   </script>
 </Admin>

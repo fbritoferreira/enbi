@@ -1,13 +1,20 @@
 ---
 import Admin from "../layouts/Admin.astro";
 ---
-<Admin title="Edit — enbi">
-  <h1 id="heading">Entry</h1>
-  <p id="hist-link" hidden><a id="hist-a" href="#">History</a></p>
-  <button id="publish-toggle" hidden></button>
+<Admin title="Edit — enbi" active="/">
+  <div style="display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+    <h1 id="heading" style="margin:0;">Entry</h1>
+    <p id="hist-link" hidden style="margin:0;"><a id="hist-a" href="#">History</a></p>
+  </div>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <button id="publish-toggle" hidden></button>
+  </div>
   <form id="form"></form>
-  <button id="del" hidden>Delete</button>
+  <div style="margin-top:0.5rem;">
+    <button id="del" hidden class="btn-danger">Delete</button>
+  </div>
   <p class="error" id="err" hidden></p>
+
   <script>
     import { enbiFetch, escapeHtml } from "../lib/api.ts";
     const sp = new URLSearchParams(location.search);
@@ -45,6 +52,7 @@ import Admin from "../layouts/Admin.astro";
         localized: string[];
         locales: string[];
         defaultLocale: string | null;
+        widgets?: Record<string, "wysiwyg" | "text">;
       };
 
       const allMeta = (await metaRes.json()) as ColMeta[];
@@ -92,7 +100,6 @@ import Admin from "../layouts/Admin.astro";
               } else {
                 currentTranslations = {};
               }
-              // Repopulate localized fields with translation values (or base values).
               for (const fieldName of col.localized) {
                 const input = document.getElementById(`f_${fieldName}`) as HTMLInputElement | null;
                 if (input) {
@@ -109,11 +116,15 @@ import Admin from "../layouts/Admin.astro";
 
         // ── Form fields ────────────────────────────────────────────────────────
         const parts: string[] = [];
+        const wysiwygCols: string[] = [];
+
         for (const c of col.columns) {
           const isRelation = Boolean(col.relations[c.name]);
           const isPk = c.name === col.primaryKey;
           const isRequired = Boolean(col.validate[c.name]?.required);
-          const labelText = escapeHtml(c.name) + (isRequired ? " *" : "");
+          const isWysiwyg = col.widgets?.[c.name] === "wysiwyg";
+          const labelText = escapeHtml(c.name) + (isRequired ? " <span class='req'>*</span>" : "");
+
           if (isRelation && !isPk) {
             const targetName = col.relations[c.name].collection;
             let opts = `<option value="">-- none --</option>`;
@@ -129,22 +140,47 @@ import Admin from "../layouts/Admin.astro";
                   opts += `<option value="${idVal}"${sel}>${labelVal}</option>`;
                 }
               }
-            } catch { /* leave as empty select on network error */ }
+            } catch { /* leave as empty select */ }
             parts.push(
               `<label for="f_${escapeHtml(c.name)}">${labelText}</label><select id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}">${opts}</select>`,
             );
+          } else if (isWysiwyg) {
+            // Hidden input keeps .value in sync for submit logic; CKEditor attaches to the div.
+            const currentVal = escapeHtml(current[c.name]);
+            parts.push(
+              `<label>${labelText}</label>` +
+              `<input type="hidden" id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${currentVal}" />` +
+              `<div class="ck-container" data-field="${escapeHtml(c.name)}" style="max-width:32rem;border:1px solid var(--rule);border-radius:3px;overflow:hidden;"></div>`,
+            );
+            wysiwygCols.push(c.name);
           } else {
             parts.push(
-              `<label for="f_${escapeHtml(c.name)}">${labelText}</label><input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${isPk && !isNew ? "readonly" : ""} />`,
+              `<label for="f_${escapeHtml(c.name)}">${labelText}</label>` +
+              `<input id="f_${escapeHtml(c.name)}" name="${escapeHtml(c.name)}" value="${escapeHtml(current[c.name])}" ${isPk && !isNew ? "readonly" : ""} />`,
             );
           }
         }
         form.innerHTML = parts.join("") + `<button type="submit">Save</button>`;
 
+        // ── CKEditor init ──────────────────────────────────────────────────────
+        if (wysiwygCols.length > 0) {
+          const { default: ClassicEditor } = await import("@ckeditor/ckeditor5-build-classic");
+          for (const fieldName of wysiwygCols) {
+            const hidden = document.getElementById(`f_${fieldName}`) as HTMLInputElement | null;
+            const container = form.querySelector<HTMLElement>(`.ck-container[data-field="${CSS.escape(fieldName)}"]`);
+            if (!hidden || !container) continue;
+            ClassicEditor.create(container).then((editor) => {
+              editor.setData(hidden.value);
+              editor.model.document.on("change:data", () => {
+                hidden.value = editor.getData();
+              });
+            }).catch(console.error);
+          }
+        }
+
         form.addEventListener("submit", async (e) => {
           e.preventDefault();
           if (!isNew && hasLocales && activeLocale !== defaultLocale) {
-            // Non-default locale: write only localized fields via translations PUT.
             const translationBody: Record<string, string> = {};
             for (const fieldName of col.localized) {
               const input = document.getElementById(`f_${fieldName}`) as HTMLInputElement | null;
@@ -160,7 +196,6 @@ import Admin from "../layouts/Admin.astro";
               showErr(`Save translations failed (${res.status}).`);
             }
           } else {
-            // Default locale (or no i18n): write base row as before.
             const body: Record<string, string> = {};
             for (const c of col.columns) {
               const input = document.getElementById(`f_${c.name}`) as HTMLInputElement | null;

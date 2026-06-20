@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import {
   apiKeyProvider,
+  authSchema,
   type AuthProvider,
   composeProviders,
   generateApiKey,
@@ -694,6 +695,124 @@ test("GET /api/admin_collections returns metadata, admin-only", async () => {
   // viewer (read shorthand) is NOT admin → 403
   const denied = await app.request("/api/admin_collections", { headers: { "x-role": "viewer" } });
   expect(denied.status).toBe(403);
+});
+
+// ── widgets field option ──────────────────────────────────────────────────────
+
+test("GET /api/admin_collections: widgets field present on each entry (array payload)", async () => {
+  // A collection with widgets: { body: "wysiwyg" }
+  const localPages = sqliteTable("local_pages", {
+    id: text("id").primaryKey(),
+    body: text("body").notNull(),
+  });
+  const ctx2 = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx2.db.run(sql`CREATE TABLE local_pages (id text PRIMARY KEY, body text NOT NULL)`);
+  await ctx2.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx2.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await ctx2.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app2 = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(localPages, { name: "local_pages", widgets: { body: "wysiwyg" } }),
+        collection(posts, { name: "posts" }),
+      ],
+    },
+    { db: ctx2, authProvider: stubAuth },
+  );
+
+  const res = await app2.request("/api/admin_collections", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const payload = (await res.json()) as { name: string; widgets: Record<string, string> }[];
+
+  // Must still be an array
+  expect(Array.isArray(payload)).toBe(true);
+
+  // Collection with explicit widgets: { body: "wysiwyg" }
+  const pagesMeta = payload.find((m) => m.name === "local_pages");
+  expect(pagesMeta?.widgets).toEqual({ body: "wysiwyg" });
+
+  // Collection without widgets → empty object
+  const postsMeta = payload.find((m) => m.name === "posts");
+  expect(postsMeta?.widgets).toEqual({});
+});
+
+// ── GET /api/admin_setup — first-run detection ────────────────────────────────
+
+test("GET /api/admin_setup: needsSetup=true with 0 users, needsSetup=false after inserting a user", async () => {
+  const authConfig = { secret: "test-secret-setup" };
+  const setupCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+
+  // Create the system tables the server and auth layer need.
+  await setupCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await setupCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await setupCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+
+  // mountSetup queries the `user` table from authSchema. Create it so the
+  // count query succeeds. We use the drizzle table columns to build the DDL.
+  // The minimal columns needed for a count are just id + name + email.
+  await setupCtx.db.run(sql`CREATE TABLE "user" (
+    id text PRIMARY KEY,
+    name text NOT NULL,
+    email text NOT NULL,
+    "emailVerified" integer NOT NULL,
+    image text,
+    "createdAt" integer NOT NULL,
+    "updatedAt" integer NOT NULL,
+    role text,
+    banned integer,
+    "banReason" text,
+    "banExpires" integer
+  )`);
+
+  const setupApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: authConfig,
+      roles: { admin: "*" },
+      collections: [],
+    },
+    { db: setupCtx, authProvider: stubAuth },
+  );
+
+  // Before any user exists → needsSetup: true
+  const before = await setupApp.request("/api/admin_setup");
+  expect(before.status).toBe(200);
+  const beforeBody = (await before.json()) as { needsSetup: boolean };
+  expect(beforeBody.needsSetup).toBe(true);
+
+  // Insert a user row directly (reliable — no network/better-auth table deps).
+  // We use the drizzle userTable from authSchema so we go through the ORM,
+  // exactly mirroring how mountSetup counts rows.
+  const userTable = authSchema(authConfig, setupCtx.dialect).user;
+  await setupCtx.db.insert(userTable as never).values({
+    id: "u1",
+    name: "Admin",
+    email: "admin@example.com",
+    emailVerified: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as never);
+
+  // After inserting one user → needsSetup: false
+  const after = await setupApp.request("/api/admin_setup");
+  expect(after.status).toBe(200);
+  const afterBody = (await after.json()) as { needsSetup: boolean };
+  expect(afterBody.needsSetup).toBe(false);
 });
 
 // ── Media tests ──────────────────────────────────────────────────────────────
