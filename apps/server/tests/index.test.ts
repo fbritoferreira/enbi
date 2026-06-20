@@ -251,9 +251,11 @@ test("listRows paginates, sorts, and filters", async () => {
     sort: { column: "views", dir: "desc" },
   });
   expect(page.map((r) => r.id)).toEqual(["p3", "p2"]);
-  const filtered = await listRows(ctx.db, posts, { filters: [{ column: "title", value: "t4" }] });
+  const filtered = await listRows(ctx.db, posts, {
+    filters: [{ column: "title", op: "eq", value: "t4" }],
+  });
   expect(filtered).toHaveLength(1);
-  expect(await countRows(ctx.db, posts, [{ column: "title", value: "t4" }])).toBe(1);
+  expect(await countRows(ctx.db, posts, [{ column: "title", op: "eq", value: "t4" }])).toBe(1);
 });
 
 test("listRows rejects an unknown column", async () => {
@@ -263,7 +265,7 @@ test("listRows rejects an unknown column", async () => {
   );
   const { listRows } = await import("../src/crud.ts");
   await expect(
-    listRows(ctx.db, posts, { filters: [{ column: "nope", value: "x" }] }),
+    listRows(ctx.db, posts, { filters: [{ column: "nope", op: "eq", value: "x" }] }),
   ).rejects.toMatchObject({
     code: "validation",
   });
@@ -296,6 +298,207 @@ test("CORS headers are sent only when admin.origin is configured", async () => {
   const noCors = await createServer(base, { db: ctx2, authProvider: stubAuth });
   const r2 = await noCors.request("/api/posts", { headers: { origin: "http://localhost:4321" } });
   expect(r2.headers.get("access-control-allow-origin")).toBeNull();
+});
+
+// ── Richer Query tests (TDD: written before implementation) ──────────────────
+
+test("richer query: like operator matches substring (?title__like=ell)", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','world',2)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p3','yellow',3)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?title__like=ell", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id).sort()).toEqual(["p1", "p3"]);
+  expect(res.headers.get("X-Total-Count")).toBe("2");
+});
+
+test("richer query: gte operator filters rows (?views__gte=2)", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','a',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','b',2)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p3','c',3)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?views__gte=2", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id).sort()).toEqual(["p2", "p3"]);
+});
+
+test("richer query: ne operator excludes matching rows (?views__ne=2)", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','a',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','b',2)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p3','c',3)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?views__ne=2", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id).sort()).toEqual(["p1", "p3"]);
+});
+
+test("richer query: in operator matches rows with IDs in comma list (?id__in=p1,p3)", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','a',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','b',2)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p3','c',3)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?id__in=p1,p3", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id).sort()).toEqual(["p1", "p3"]);
+});
+
+test("richer query: _match=any applies OR semantics across filters", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','foxhunt',99)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','normal',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p3','extreme',200)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  // OR: title contains "fox" OR views >= 200 → p1 and p3
+  const res = await app.request("/api/posts?title__like=fox&views__gte=200&_match=any", {
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows.map((r) => r.id).sort()).toEqual(["p1", "p3"]);
+});
+
+test("richer query: cursor pagination returns next page and X-Next-Cursor on full page", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  // Insert 4 rows with pk-ordered IDs
+  for (const [id, title, views] of [
+    ["p1", "a", 1],
+    ["p2", "b", 2],
+    ["p3", "c", 3],
+    ["p4", "d", 4],
+  ]) {
+    await ctx.db.run(sql.raw(`INSERT INTO posts VALUES ('${id}','${title}',${views})`));
+  }
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // First page: no cursor, limit=2 → p1,p2 with X-Next-Cursor=p2 (full page)
+  const page1 = await app.request("/api/posts?limit=2", { headers: { "x-role": "admin" } });
+  expect(page1.status).toBe(200);
+  const rows1 = (await page1.json()) as { id: string }[];
+  expect(rows1.map((r) => r.id)).toEqual(["p1", "p2"]);
+  // No cursor provided for first page → no X-Next-Cursor (offset mode)
+  // (the header is only set when cursor param is used)
+
+  // Second page: cursor=p2, limit=2 → p3,p4 with X-Next-Cursor=p4 (full page)
+  const page2 = await app.request("/api/posts?limit=2&cursor=p2", {
+    headers: { "x-role": "admin" },
+  });
+  expect(page2.status).toBe(200);
+  const rows2 = (await page2.json()) as { id: string }[];
+  expect(rows2.map((r) => r.id)).toEqual(["p3", "p4"]);
+  expect(page2.headers.get("X-Next-Cursor")).toBe("p4");
+
+  // Third page: cursor=p4, limit=2 → no rows, no X-Next-Cursor
+  const page3 = await app.request("/api/posts?limit=2&cursor=p4", {
+    headers: { "x-role": "admin" },
+  });
+  expect(page3.status).toBe(200);
+  const rows3 = (await page3.json()) as { id: string }[];
+  expect(rows3).toHaveLength(0);
+  expect(page3.headers.get("X-Next-Cursor")).toBeNull();
+});
+
+test("richer query: unknown operator returns 400 (?title__zzz=x)", async () => {
+  const res = await app.request("/api/posts?title__zzz=x", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(400);
+});
+
+test("richer query: backward compat — plain ?field=value still means eq", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+  await ctx.db.run(sql`INSERT INTO posts VALUES ('p2','world',2)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+  const res = await app.request("/api/posts?title=hello", { headers: { "x-role": "admin" } });
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].id).toBe("p1");
+  expect(res.headers.get("X-Total-Count")).toBe("1");
 });
 
 test("GET /api/admin_collections returns metadata, admin-only", async () => {

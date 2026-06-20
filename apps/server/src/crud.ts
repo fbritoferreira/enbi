@@ -11,17 +11,29 @@ import {
   desc,
   eq,
   getTableColumns,
+  gt,
+  gte,
+  inArray,
+  like,
+  lt,
+  lte,
+  ne,
+  or,
   type SQL,
   type Table,
 } from "drizzle-orm";
 
 export type Row = Record<string, unknown>;
-export type ListFilter = { column: string; value: string };
+export type FilterOp = "eq" | "ne" | "like" | "gt" | "gte" | "lt" | "lte" | "in";
+export type ListFilter = { column: string; op: FilterOp; value: string };
 export type ListOptions = {
   limit?: number;
   offset?: number;
   sort?: { column: string; dir: "asc" | "desc" };
   filters?: ListFilter[];
+  match?: "all" | "any";
+  cursor?: string;
+  primaryKey?: string;
 };
 
 export function assertColumn(table: Table, name: string): Column {
@@ -36,10 +48,37 @@ function pkColumn(table: Table, primaryKey: string): Column {
   return column;
 }
 
-function whereFor(table: Table, filters?: ListFilter[]): SQL | undefined {
+function filterClause(table: Table, f: ListFilter): SQL {
+  const col = assertColumn(table, f.column);
+  switch (f.op) {
+    case "eq":
+      return eq(col, f.value);
+    case "ne":
+      return ne(col, f.value);
+    case "like":
+      return like(col, `%${f.value}%`);
+    case "gt":
+      return gt(col, f.value);
+    case "gte":
+      return gte(col, f.value);
+    case "lt":
+      return lt(col, f.value);
+    case "lte":
+      return lte(col, f.value);
+    case "in":
+      return inArray(col, f.value.split(","));
+  }
+}
+
+function whereFor(
+  table: Table,
+  filters?: ListFilter[],
+  match: "all" | "any" = "all",
+): SQL | undefined {
   if (!filters?.length) return undefined;
-  const clauses = filters.map((f) => eq(assertColumn(table, f.column), f.value));
-  return clauses.length === 1 ? clauses[0] : and(...clauses);
+  const clauses = filters.map((f) => filterClause(table, f));
+  if (clauses.length === 1) return clauses[0];
+  return match === "any" ? or(...clauses) : and(...clauses);
 }
 
 export async function listRows(
@@ -48,14 +87,24 @@ export async function listRows(
   opts: ListOptions = {},
 ): Promise<Row[]> {
   let q = db.select().from(table).$dynamic();
-  const where = whereFor(table, opts.filters);
-  if (where) q = q.where(where);
-  if (opts.sort) {
-    const col = assertColumn(table, opts.sort.column);
-    q = q.orderBy(opts.sort.dir === "desc" ? desc(col) : asc(col));
+  const filterWhere = whereFor(table, opts.filters, opts.match);
+
+  if (opts.cursor !== undefined && opts.primaryKey !== undefined) {
+    // Keyset pagination: add gt(pk, cursor) AND-combined with filter where-clause, order by pk asc.
+    const pkCol = pkColumn(table, opts.primaryKey);
+    const cursorClause = gt(pkCol, opts.cursor);
+    const where = filterWhere ? and(filterWhere, cursorClause) : cursorClause;
+    q = q.where(where).orderBy(asc(pkCol));
+  } else {
+    if (filterWhere) q = q.where(filterWhere);
+    if (opts.sort) {
+      const col = assertColumn(table, opts.sort.column);
+      q = q.orderBy(opts.sort.dir === "desc" ? desc(col) : asc(col));
+    }
+    if (opts.offset !== undefined) q = q.offset(opts.offset);
   }
+
   if (opts.limit !== undefined) q = q.limit(opts.limit);
-  if (opts.offset !== undefined) q = q.offset(opts.offset);
   return (await q) as Row[];
 }
 
@@ -63,9 +112,10 @@ export async function countRows(
   db: EnbiDatabase,
   table: Table,
   filters?: ListFilter[],
+  match?: "all" | "any",
 ): Promise<number> {
   let q = db.select({ n: count() }).from(table).$dynamic();
-  const where = whereFor(table, filters);
+  const where = whereFor(table, filters, match);
   if (where) q = q.where(where);
   const rows = (await q) as { n: number }[];
   return rows[0]?.n ?? 0;
