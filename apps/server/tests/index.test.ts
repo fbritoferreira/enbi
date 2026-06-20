@@ -939,6 +939,79 @@ test("drafts: POST without status (admin) defaults to draft; public list exclude
   expect(pub.headers.get("X-Total-Count")).toBe("0");
 });
 
+test("drafts: _match=any does not leak draft rows to public callers", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Hello','published')`);
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a2','Draft','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller with _match=any must NOT see the draft row.
+  // The server forces match="all" for public callers on drafts collections, so
+  // all user filters are AND-ed together with the mandatory status=published gate.
+  // A filter of status__ne=published combined (AND) with status__eq=published
+  // matches nothing — so no rows are returned at all, and critically the draft
+  // (a2) is not exposed.
+  const res = await app.request("/api/articles?status__ne=published&_match=any");
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string }[];
+  // Draft must not leak — the entire point of this test.
+  expect(rows.map((r) => r.id)).not.toContain("a2");
+  // Total reflects the AND-filtered result (no rows match both constraints)
+  expect(res.headers.get("X-Total-Count")).toBe("0");
+});
+
+test("drafts: public caller cannot access revisions of a draft entry", async () => {
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE articles (id text PRIMARY KEY, title text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(sql`INSERT INTO articles VALUES ('a1','Draft entry','draft')`);
+  await ctx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await ctx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const app = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(articles, { name: "articles", drafts: true, public: ["read"] as const }),
+      ],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller → 404 on revisions of a draft entry
+  const pub = await app.request("/api/articles/a1/revisions");
+  expect(pub.status).toBe(404);
+
+  // Admin → can access revisions
+  const adm = await app.request("/api/articles/a1/revisions", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+});
+
 test("drafts: non-drafts collection is unaffected — no status filtering", async () => {
   // The existing `posts` collection has no drafts option.
   // Insert a row and verify the public (no-auth, but posts requires auth via admin role)
