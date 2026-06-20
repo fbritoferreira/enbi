@@ -1,0 +1,69 @@
+---
+import Admin from "../layouts/Admin.astro";
+---
+<Admin title="Media — enbi">
+  <h1>Media</h1>
+  <form id="upload">
+    <label for="file">File</label>
+    <input id="file" type="file" />
+    <button type="submit">Upload</button>
+  </form>
+  <p id="msg"></p>
+  <table>
+    <thead><tr><th>filename</th><th>mime</th><th>size</th><th>link</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <script>
+    import { enbiFetch, escapeHtml, apiBase } from "../lib/api.ts";
+    const rowsEl = document.getElementById("rows");
+    const msgEl = document.getElementById("msg");
+    async function load() {
+      const res = await enbiFetch("/api/admin_media");
+      if (res.status === 401) { location.href = "/login"; return; }
+      const items = (await res.json()) as { id: string; filename: string; mime: string; size: number }[];
+      if (rowsEl) {
+        rowsEl.innerHTML = items
+          .map(
+            (m) =>
+              `<tr>
+                <td>${escapeHtml(m.filename)}</td>
+                <td>${escapeHtml(m.mime)}</td>
+                <td>${escapeHtml(m.size)}</td>
+                <td><a href="${escapeHtml(apiBase())}/api/media/${escapeHtml(m.id)}" target="_blank">open</a></td>
+                <td><button data-id="${escapeHtml(m.id)}">delete</button></td>
+              </tr>`,
+          )
+          .join("");
+        rowsEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
+          b.addEventListener("click", async () => {
+            await enbiFetch(`/api/admin_media/${encodeURIComponent(b.dataset.id ?? "")}`, { method: "DELETE" });
+            void load();
+          }),
+        );
+      }
+    }
+    const uploadForm = document.getElementById("upload");
+    uploadForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("file") as HTMLInputElement;
+      const f = input.files?.[0];
+      if (!f) return;
+      const form = new FormData();
+      form.append("file", f);
+      // Raw fetch: do NOT set content-type — the browser sets the multipart boundary.
+      const res = await fetch(`${apiBase()}/api/admin_media`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      });
+      if (res.ok) {
+        if (msgEl) msgEl.textContent = "Uploaded.";
+        input.value = "";
+        void load();
+      } else {
+        if (msgEl) msgEl.textContent = `Upload failed (${res.status.toString()}).`;
+      }
+    });
+    void load();
+  </script>
+</Admin>
