@@ -13,10 +13,12 @@ export {
 export {
   AUTH_BASE_PATH,
   betterAuthProvider,
+  type BuildAuthOpts,
   buildAuthOptions,
   createAuth,
   DEFAULT_ROLE,
   type EnbiAuth,
+  type EnbiAuthOptions,
 } from "./auth.ts";
 export { authSchema } from "./schema.ts";
 export { can, type CanOptions, type RolesConfig } from "./permissions.ts";

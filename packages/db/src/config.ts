@@ -70,8 +70,12 @@ export type EnbiConfig = {
   auth: EnbiAuthConfig;
   roles: Record<string, RolePermission>;
   collections: AnyCollection[];
-  /** Admin UI origin allowed to call the API with credentials (CORS). */
-  admin?: { origin?: string };
+  /**
+   * Admin UI origin allowed to call the API with credentials (CORS).
+   * Set `crossSite: true` when the admin is on a different domain than the API
+   * (requires HTTPS) — opts the session cookie into `SameSite=None; Secure`.
+   */
+  admin?: { origin?: string; crossSite?: boolean };
   /** Local-disk media store configuration (ADR-0044). */
   media?: { dir?: string };
   /** Outbound webhook endpoints notified on content mutations (ADR-0047). */

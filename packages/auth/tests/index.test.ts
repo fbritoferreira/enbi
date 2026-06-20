@@ -6,6 +6,7 @@ import {
   apiKeyProvider,
   authSchema,
   betterAuthProvider,
+  buildAuthOptions,
   can,
   composeProviders,
   createAuth,
@@ -151,6 +152,18 @@ test("authSchema produces drizzle tables for better-auth's models", () => {
   expect(columns).toContain("email");
   // admin plugin adds a `role` field to user.
   expect(columns).toContain("role");
+});
+
+test("buildAuthOptions with crossSite:true sets SameSite=None and useSecureCookies", () => {
+  const opts = buildAuthOptions({ secret: "test-secret-value-1234567890" }, { crossSite: true });
+  expect(opts.advanced?.useSecureCookies).toBe(true);
+  expect(opts.advanced?.defaultCookieAttributes?.sameSite).toBe("none");
+  expect(opts.advanced?.defaultCookieAttributes?.secure).toBe(true);
+});
+
+test("buildAuthOptions without opts leaves advanced undefined", () => {
+  const opts = buildAuthOptions({ secret: "test-secret-value-1234567890" });
+  expect(opts.advanced).toBeUndefined();
 });
 
 test("createAuth boots a better-auth instance with a handler", async () => {
