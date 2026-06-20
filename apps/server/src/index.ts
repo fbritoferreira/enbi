@@ -361,7 +361,7 @@ export async function createServer(
   let auth = opts.authProvider;
   if (!auth) {
     const trustedOrigins = adminOrigin ? [adminOrigin] : undefined;
-    const instance = createAuth(ctx, config.auth, trustedOrigins);
+    const instance = createAuth(ctx, config.auth, trustedOrigins, config.admin?.crossSite);
     app.on(["GET", "POST"], `${AUTH_BASE_PATH}/*`, (c) => instance.handler(c.req.raw));
     // API key (x-api-key / Bearer) is tried first, then a better-auth session.
     auth = composeProviders(apiKeyProvider(ctx.db, ctx.apiKeys), betterAuthProvider(instance));

@@ -50,6 +50,18 @@ export type EnbiAuthOptions = {
   plugins: unknown[];
   /** Extra origins better-auth trusts for CSRF / redirect checks. */
   trustedOrigins?: string[];
+  /**
+   * Cross-domain cookie settings. When `crossSite` is true, better-auth is
+   * instructed to issue `SameSite=None; Secure` session cookies so they are
+   * sent on cross-origin fetches (requires HTTPS — ADR-0048).
+   */
+  advanced?: {
+    useSecureCookies?: boolean;
+    defaultCookieAttributes?: {
+      sameSite?: "lax" | "strict" | "none";
+      secure?: boolean;
+    };
+  };
 };
 
 /** Role the very first user receives so a fresh install has a super-admin (ADR-0034). */
@@ -79,13 +91,24 @@ function firstUserAdminHook(ctx: EnbiDb, authConfig: EnbiAuthConfig) {
   };
 }
 
+/** Options forwarded to {@link buildAuthOptions} beyond the auth config itself. */
+export type BuildAuthOpts = {
+  trustedOrigins?: string[];
+  /**
+   * When true, sets `SameSite=None; Secure` on the session cookie so it is
+   * sent on cross-origin fetches (admin on a different domain). Requires
+   * HTTPS in production (ADR-0048).
+   */
+  crossSite?: boolean;
+};
+
 /**
  * Shared by {@link createAuth} (runtime) and `authSchema` (migration table
  * generation), so both see the same plugins/fields. The DB adapter is added separately.
  */
 export function buildAuthOptions(
   authConfig: EnbiAuthConfig,
-  trustedOrigins?: string[],
+  opts?: BuildAuthOpts,
 ): EnbiAuthOptions {
   const social: Record<string, { clientId: string; clientSecret: string }> = {};
   if (authConfig.social?.github) social.github = authConfig.social.github;
@@ -95,13 +118,18 @@ export function buildAuthOptions(
     ? [genericOAuth({ config: authConfig.ssoProviders })]
     : [];
 
+  const advanced: EnbiAuthOptions["advanced"] = opts?.crossSite
+    ? { useSecureCookies: true, defaultCookieAttributes: { sameSite: "none", secure: true } }
+    : undefined;
+
   return {
     secret: authConfig.secret,
     baseURL: authConfig.baseURL,
     emailAndPassword: { enabled: authConfig.emailPassword ?? true },
     socialProviders: social,
     plugins: [admin({ defaultRole: authConfig.defaultRole ?? DEFAULT_ROLE }), ...sso],
-    ...(trustedOrigins?.length ? { trustedOrigins } : {}),
+    ...(opts?.trustedOrigins?.length ? { trustedOrigins: opts.trustedOrigins } : {}),
+    ...(advanced ? { advanced } : {}),
   };
 }
 
@@ -109,6 +137,7 @@ export function createAuth(
   ctx: EnbiDb,
   authConfig: EnbiAuthConfig,
   trustedOrigins?: string[],
+  crossSite?: boolean,
 ): EnbiAuth {
   return betterAuth({
     database: drizzleAdapter(ctx.db, {
@@ -119,7 +148,7 @@ export function createAuth(
     }),
     basePath: AUTH_BASE_PATH,
     databaseHooks: firstUserAdminHook(ctx, authConfig),
-    ...buildAuthOptions(authConfig, trustedOrigins),
+    ...buildAuthOptions(authConfig, { trustedOrigins, crossSite }),
   } as never) as unknown as EnbiAuth;
 }
 
