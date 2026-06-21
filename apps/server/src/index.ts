@@ -9,7 +9,7 @@ import {
   composeProviders,
   createAuth,
 } from "@enbi/auth";
-import { isNull, lte, or } from "drizzle-orm";
+import { isNull, lte, or, type SQL } from "drizzle-orm";
 import { listRevisions, restoreRevision, writeRevision } from "@enbi/core";
 import { Hono } from "hono";
 import { overlayTranslations, readTranslations, writeTranslations } from "./i18n.ts";
@@ -88,6 +88,15 @@ async function resolveExpanded(
   ) {
     return null;
   }
+  // Scheduled gate: if the target collection has scheduled enabled and the
+  // caller is public, hide rows whose publish_at is set and in the future so
+  // future-scheduled rows cannot be leaked via the expand path (ADR-0052).
+  if (targetCol.scheduled && callerRole === PUBLIC_ROLE) {
+    const publishAt = expanded[targetCol.scheduled.column];
+    if (typeof publishAt === "string" && publishAt > new Date().toISOString()) {
+      return null;
+    }
+  }
   return expanded;
 }
 
@@ -163,7 +172,7 @@ function mountCollection(
       // publish_at column IS NULL or <= now (UTC ISO-8601). This is expressed as a
       // SQL predicate (extraWhere) so it is always AND-combined with user filters,
       // even when match="any", regardless of the OR/AND mode chosen by the user.
-      let scheduleExtraWhere: import("drizzle-orm").SQL | undefined;
+      let scheduleExtraWhere: SQL | undefined;
       if (col.scheduled && caller.role === PUBLIC_ROLE) {
         const nowIso = new Date().toISOString();
         const schedCol = assertColumn(col.table, col.scheduled.column);
@@ -386,9 +395,20 @@ function mountCollection(
     const caller = await authorize(auth, roles, col, "read", c.req.raw.headers);
     const id = c.req.param("id");
     // Draft gate: public callers cannot access revision history of unpublished entries (ADR-0045).
+    let revisionsRow: Awaited<ReturnType<typeof getRow>> | undefined;
     if (col.drafts && caller.role === PUBLIC_ROLE) {
-      const row = await getRow(ctx.db, col.table, col.primaryKey, id);
-      if (!row || row[col.drafts.column] !== "published") {
+      revisionsRow = await getRow(ctx.db, col.table, col.primaryKey, id);
+      if (!revisionsRow || revisionsRow[col.drafts.column] !== "published") {
+        throw new EnbiError("not_found", `${col.name} not found.`);
+      }
+    }
+    // Scheduled gate: public callers cannot access revision history of future-scheduled
+    // entries — reuse the already-fetched row when available (ADR-0052).
+    if (col.scheduled && caller.role === PUBLIC_ROLE) {
+      const row = revisionsRow ?? (await getRow(ctx.db, col.table, col.primaryKey, id));
+      if (!row) throw new EnbiError("not_found", `${col.name} not found.`);
+      const publishAt = row[col.scheduled.column];
+      if (typeof publishAt === "string" && publishAt > new Date().toISOString()) {
         throw new EnbiError("not_found", `${col.name} not found.`);
       }
     }
@@ -428,6 +448,14 @@ function mountCollection(
     // Draft gate: public callers must not read translations of a non-published entry (ADR-0045).
     if (col.drafts && caller.role === PUBLIC_ROLE && existing[col.drafts.column] !== "published") {
       throw new EnbiError("not_found", `${col.name} not found.`);
+    }
+    // Scheduled gate: public callers must not read translations of a future-scheduled entry
+    // (ADR-0052). Reuse the already-fetched `existing` row.
+    if (col.scheduled && caller.role === PUBLIC_ROLE) {
+      const publishAt = existing[col.scheduled.column];
+      if (typeof publishAt === "string" && publishAt > new Date().toISOString()) {
+        throw new EnbiError("not_found", `${col.name} not found.`);
+      }
     }
     const translations = await readTranslations(ctx.db, ctx.translations, col.name, id, locale);
     return c.json(translations);

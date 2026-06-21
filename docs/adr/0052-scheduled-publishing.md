@@ -38,6 +38,9 @@ Public callers (role `"public"`) see a row only when the `publish_at` column is
 Authenticated callers (any non-public role) see all rows regardless of
 `publish_at`.
 
+The scheduled gate applies to ALL public read paths — no sub-resource leaks
+future-scheduled content to unauthenticated callers:
+
 - `GET /api/:collection` — the gate is expressed as a SQL predicate
   (`OR(IS NULL, LTE now)`) passed as `extraWhere` to both `listRows` and
   `countRows`. Because `extraWhere` is AND-combined with the filter-derived
@@ -47,6 +50,15 @@ Authenticated callers (any non-public role) see all rows regardless of
   truthy, the caller is public, and `row[col.scheduled.column]` is set and its
   ISO-8601 string value is greater than `new Date().toISOString()`, a 404 is
   returned.
+- `GET /api/:collection/:id/revisions` — the scheduled gate is applied after
+  the drafts gate; a 404 is returned for future-scheduled entries for public
+  callers.
+- `GET /api/:collection/:id/translations/:locale` — the scheduled gate is
+  applied using the already-fetched entry row; a 404 is returned for
+  future-scheduled entries for public callers.
+- `?expand=<relation>` (on list and GET `/:id`) — the `resolveExpanded` helper
+  applies the scheduled gate to the expanded target row; a future-scheduled
+  target resolves to `null` for public callers, exactly as draft targets do.
 
 ### Composition with drafts
 

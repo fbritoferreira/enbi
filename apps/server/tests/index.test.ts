@@ -2715,3 +2715,199 @@ test("scheduled: non-scheduled collection is unaffected — no publish_at filter
   expect(rows).toHaveLength(1);
   expect(rows[0].id).toBe("p1");
 });
+
+// ── Security: scheduled leak via sub-resource paths (review fixes) ───────────
+
+test("security: public GET revisions of a future-scheduled entry → 404; admin → 200", async () => {
+  const { sApp, sCtx } = await buildScheduledApp();
+  // Insert a future-scheduled event with at least one revision so the admin path returns data.
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e-future-rev','Future Rev',${FUTURE})`);
+  await sCtx.db.run(
+    sql`INSERT INTO _revisions (id, collection, entry_id, version, snapshot, author_id, created_at)
+        VALUES ('r1','events','e-future-rev',1,'{}',NULL,'2099-01-01T00:00:00.000Z')`,
+  );
+
+  // Public caller (no x-role) must get 404, not the revision list.
+  const pub = await sApp.request("/api/events/e-future-rev/revisions");
+  expect(pub.status).toBe(404);
+
+  // Admin caller gets 200 with the revision data.
+  const adm = await sApp.request("/api/events/e-future-rev/revisions", {
+    headers: { "x-role": "admin" },
+  });
+  expect(adm.status).toBe(200);
+  const revs = (await adm.json()) as unknown[];
+  expect(revs.length).toBeGreaterThanOrEqual(1);
+});
+
+// Table for scheduled + localized collection (translations leak test).
+const scheduledLocalizedEvents = sqliteTable("sched_loc_events", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  publish_at: text("publish_at"),
+});
+
+async function buildScheduledI18nApp() {
+  const slCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await slCtx.db.run(sql`CREATE TABLE sched_loc_events (
+    id text PRIMARY KEY,
+    title text NOT NULL,
+    publish_at text
+  )`);
+  await slCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await slCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await slCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  await slCtx.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    locale text NOT NULL, field text NOT NULL, value text)`);
+
+  const config = defineEnbiConfig({
+    db: { dialect: "sqlite", url: ":memory:" },
+    auth: { secret: "x" },
+    roles: { admin: "*" },
+    collections: [
+      collection(scheduledLocalizedEvents, {
+        name: "sched_loc_events",
+        scheduled: true,
+        localized: ["title"],
+        public: ["read"] as const,
+      }),
+    ],
+    i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+  });
+
+  const authProvider = composeProviders(apiKeyProvider(slCtx.db, slCtx.apiKeys), stubAuth);
+  const slApp = await createServer(config, { db: slCtx, authProvider });
+  return { slApp, slCtx };
+}
+
+test("security: public GET translations of a future-scheduled entry → 404; admin → 200", async () => {
+  const { slApp, slCtx } = await buildScheduledI18nApp();
+
+  // Insert a future-scheduled entry.
+  await slCtx.db.run(
+    sql`INSERT INTO sched_loc_events (id, title, publish_at) VALUES ('sl-future','Future Title',${FUTURE})`,
+  );
+
+  // Store a French translation as admin so there IS data to potentially leak.
+  const put = await slApp.request("/api/sched_loc_events/sl-future/translations/fr", {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-role": "admin" },
+    body: JSON.stringify({ title: "Titre futur" }),
+  });
+  expect(put.status).toBe(200);
+
+  // Public caller (no x-role) must get 404, not the translation.
+  const pubGet = await slApp.request("/api/sched_loc_events/sl-future/translations/fr");
+  expect(pubGet.status).toBe(404);
+
+  // Admin caller gets 200 with the stored translation.
+  const admGet = await slApp.request("/api/sched_loc_events/sl-future/translations/fr", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admGet.status).toBe(200);
+  const data = (await admGet.json()) as Record<string, string>;
+  expect(data.title).toBe("Titre futur");
+});
+
+// Table for scheduled expand leak test.
+const schedTargets = sqliteTable("sched_targets", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  publish_at: text("publish_at"),
+});
+const schedSources = sqliteTable("sched_sources", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  targetId: text("target_id"),
+});
+
+async function buildScheduledExpandApp() {
+  const seCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await seCtx.db.run(sql`CREATE TABLE sched_targets (
+    id text PRIMARY KEY, name text NOT NULL, publish_at text
+  )`);
+  await seCtx.db.run(sql`CREATE TABLE sched_sources (
+    id text PRIMARY KEY, label text NOT NULL, target_id text
+  )`);
+  await seCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await seCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+
+  const colTargets = collection(schedTargets, {
+    name: "sched_targets",
+    scheduled: true,
+    public: ["read"] as const,
+  });
+  const colSources = collection(schedSources, {
+    name: "sched_sources",
+    public: ["read"] as const,
+    relations: { targetId: { collection: "sched_targets" } },
+  });
+
+  const seApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colSources, colTargets],
+    },
+    { db: seCtx, authProvider: stubAuth },
+  );
+  return { seApp, seCtx };
+}
+
+test("security: public expand of a future-scheduled target row gets null; admin gets the full row", async () => {
+  const { seApp, seCtx } = await buildScheduledExpandApp();
+
+  // Insert a future-scheduled target and a source that references it.
+  await seCtx.db.run(sql`INSERT INTO sched_targets VALUES ('t-future','Future Target',${FUTURE})`);
+  await seCtx.db.run(sql`INSERT INTO sched_sources VALUES ('s1','Source One','t-future')`);
+
+  // Public caller (no x-role): expanding a future-scheduled target must yield null.
+  const pubSingle = await seApp.request("/api/sched_sources/s1?expand=targetId");
+  expect(pubSingle.status).toBe(200);
+  const pubRow = (await pubSingle.json()) as Record<string, unknown>;
+  expect((pubRow._expanded as Record<string, unknown>).targetId).toBeNull();
+
+  // Public on the list endpoint — same guarantee.
+  const pubList = await seApp.request("/api/sched_sources?expand=targetId");
+  expect(pubList.status).toBe(200);
+  const pubListRows = (await pubList.json()) as Record<string, unknown>[];
+  const s1Pub = pubListRows.find((r) => r.id === "s1");
+  expect(s1Pub).toBeDefined();
+  expect((s1Pub!._expanded as Record<string, unknown>).targetId).toBeNull();
+
+  // Admin caller: expanding the same future-scheduled target returns the full row.
+  const admSingle = await seApp.request("/api/sched_sources/s1?expand=targetId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admSingle.status).toBe(200);
+  const admRow = (await admSingle.json()) as Record<string, unknown>;
+  expect((admRow._expanded as Record<string, unknown>).targetId).toMatchObject({
+    id: "t-future",
+    name: "Future Target",
+  });
+
+  // Admin on list.
+  const admList = await seApp.request("/api/sched_sources?expand=targetId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admList.status).toBe(200);
+  const admListRows = (await admList.json()) as Record<string, unknown>[];
+  const s1Adm = admListRows.find((r) => r.id === "s1");
+  expect(s1Adm).toBeDefined();
+  expect((s1Adm!._expanded as Record<string, unknown>).targetId).toMatchObject({
+    id: "t-future",
+    name: "Future Target",
+  });
+});
