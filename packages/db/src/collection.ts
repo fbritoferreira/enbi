@@ -77,6 +77,15 @@ export type CollectionOptions = {
    * text input for "text". Fields not listed use the default widget for their type.
    */
   widgets?: Record<string, "wysiwyg" | "text">;
+  /**
+   * Enable scheduled publishing for this collection. When truthy the table MUST
+   * have the named timestamp column (a text column storing ISO-8601 strings).
+   * Public callers only see rows where that column IS NULL or <= now (UTC).
+   * Authenticated callers see all rows. `true` uses column name `"publish_at"`.
+   * An object `{ column: "my_col" }` overrides. Composes with `drafts` — both
+   * gates apply (AND) when both are enabled. (ADR-0052)
+   */
+  scheduled?: boolean | { column?: string };
 };
 
 export type Collection<T extends Table = Table> = {
@@ -116,6 +125,13 @@ export type Collection<T extends Table = Table> = {
    * Defaults to {} (no overrides).
    */
   widgets: Record<string, string>;
+  /**
+   * Scheduled-publish configuration. `false` means disabled. When truthy the named
+   * column gates visibility for public callers: a row is visible only when the column
+   * IS NULL or <= the current UTC time (ISO-8601). Authenticated callers see all rows.
+   * Composes with `drafts` (AND). (ADR-0052)
+   */
+  scheduled: { column: string } | false;
 };
 
 export type AnyCollection = Collection;
@@ -147,6 +163,14 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     return { column: raw.column ?? "status" };
   }
 
+  function normalizeScheduled(
+    raw: boolean | { column?: string } | undefined,
+  ): { column: string } | false {
+    if (!raw) return false;
+    if (raw === true) return { column: "publish_at" };
+    return { column: raw.column ?? "publish_at" };
+  }
+
   return {
     table,
     name: options.name,
@@ -156,6 +180,7 @@ export function collection<T extends Table>(table: T, options: CollectionOptions
     public: options.public ?? false,
     primaryKey: resolvePrimaryKey(options.name, table),
     drafts: normalizeDrafts(options.drafts),
+    scheduled: normalizeScheduled(options.scheduled),
     relations: options.relations ?? {},
     validate: options.validate ?? {},
     localized: options.localized ?? [],
