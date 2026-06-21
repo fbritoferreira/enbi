@@ -153,6 +153,17 @@ export async function getRow(
   return rows[0];
 }
 
+export async function getRowsByIds(
+  db: EnbiDatabase,
+  table: Table,
+  primaryKey: string,
+  ids: string[],
+): Promise<Row[]> {
+  if (ids.length === 0) return [];
+  const pkCol = pkColumn(table, primaryKey);
+  return (await db.select().from(table).where(inArray(pkCol, ids))) as Row[];
+}
+
 export async function insertRow(db: EnbiDatabase, table: Table, values: Row): Promise<void> {
   await db.insert(table).values(values as never);
 }

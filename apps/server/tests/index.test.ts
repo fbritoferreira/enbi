@@ -2911,3 +2911,152 @@ test("security: public expand of a future-scheduled target row gets null; admin 
     name: "Future Target",
   });
 });
+
+test("batch expand: 3-row list — each row gets correct _expanded; draft target is null for public, full row for admin", async () => {
+  const authorsTable = sqliteTable("batch_authors", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    status: text("status").notNull(),
+  });
+  const postsTable = sqliteTable("batch_posts", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    authorId: text("author_id"),
+  });
+
+  const ctx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await ctx.db.run(
+    sql`CREATE TABLE batch_authors (id text PRIMARY KEY, name text NOT NULL, status text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE batch_posts (id text PRIMARY KEY, title text NOT NULL, author_id text)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await ctx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  // Two published authors and one draft author
+  await ctx.db.run(sql`INSERT INTO batch_authors VALUES ('au1','Alice','published')`);
+  await ctx.db.run(sql`INSERT INTO batch_authors VALUES ('au2','Bob','published')`);
+  await ctx.db.run(sql`INSERT INTO batch_authors VALUES ('au3','Charlie','draft')`);
+
+  // Three posts: two pointing to published authors, one to the draft
+  await ctx.db.run(sql`INSERT INTO batch_posts VALUES ('p1','Post 1','au1')`);
+  await ctx.db.run(sql`INSERT INTO batch_posts VALUES ('p2','Post 2','au2')`);
+  await ctx.db.run(sql`INSERT INTO batch_posts VALUES ('p3','Post 3','au3')`);
+
+  const colAuthors = collection(authorsTable, {
+    name: "batch_authors",
+    drafts: { column: "status" },
+    public: ["read"] as const,
+  });
+  const colPosts = collection(postsTable, {
+    name: "batch_posts",
+    public: ["read"] as const,
+    relations: { authorId: { collection: "batch_authors" } },
+  });
+
+  const batchApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colPosts, colAuthors],
+    },
+    { db: ctx, authProvider: stubAuth },
+  );
+
+  // Public caller: draft author must be null
+  const pubRes = await batchApp.request("/api/batch_posts?expand=authorId");
+  expect(pubRes.status).toBe(200);
+  const pubRows = (await pubRes.json()) as Record<string, unknown>[];
+  expect(pubRows).toHaveLength(3);
+  const p1Pub = pubRows.find((r) => r.id === "p1");
+  const p2Pub = pubRows.find((r) => r.id === "p2");
+  const p3Pub = pubRows.find((r) => r.id === "p3");
+  expect((p1Pub!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au1",
+    name: "Alice",
+  });
+  expect((p2Pub!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au2",
+    name: "Bob",
+  });
+  expect((p3Pub!._expanded as Record<string, unknown>).authorId).toBeNull(); // draft → null for public
+
+  // Admin caller: draft author must be present
+  const admRes = await batchApp.request("/api/batch_posts?expand=authorId", {
+    headers: { "x-role": "admin" },
+  });
+  expect(admRes.status).toBe(200);
+  const admRows = (await admRes.json()) as Record<string, unknown>[];
+  const p3Adm = admRows.find((r) => r.id === "p3");
+  expect((p3Adm!._expanded as Record<string, unknown>).authorId).toMatchObject({
+    id: "au3",
+    name: "Charlie",
+    status: "draft",
+  });
+});
+
+test("batch i18n: list with ?locale=fr overlays correct translation per row; missing translation falls back to default", async () => {
+  const i18nPostsTable = sqliteTable("i18n_posts", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+  });
+
+  const i18nCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await i18nCtx.db.run(sql`CREATE TABLE i18n_posts (id text PRIMARY KEY, title text NOT NULL)`);
+  await i18nCtx.db.run(sql`CREATE TABLE _translations (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    locale text NOT NULL, field text NOT NULL, value text)`);
+  await i18nCtx.db.run(
+    sql`CREATE TABLE _revisions (id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL, version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`,
+  );
+  await i18nCtx.db.run(
+    sql`CREATE TABLE _api_keys (id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL, label text, created_at text NOT NULL, last_used_at text)`,
+  );
+
+  // Three posts in the default locale (en)
+  await i18nCtx.db.run(sql`INSERT INTO i18n_posts VALUES ('ip1','Hello in English')`);
+  await i18nCtx.db.run(sql`INSERT INTO i18n_posts VALUES ('ip2','World in English')`);
+  await i18nCtx.db.run(sql`INSERT INTO i18n_posts VALUES ('ip3','No translation')`);
+
+  // French translations for ip1 and ip2 only (ip3 has none — falls back to English)
+  await i18nCtx.db.run(
+    sql`INSERT INTO _translations VALUES ('t1','i18n_posts','ip1','fr','title','Bonjour en Français')`,
+  );
+  await i18nCtx.db.run(
+    sql`INSERT INTO _translations VALUES ('t2','i18n_posts','ip2','fr','title','Monde en Français')`,
+  );
+
+  const colI18nPosts = collection(i18nPostsTable, {
+    name: "i18n_posts",
+    localized: ["title"] as const,
+    public: ["read"] as const,
+  });
+
+  const i18nApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [colI18nPosts],
+      i18n: { locales: ["en", "fr"], defaultLocale: "en" },
+    },
+    { db: i18nCtx, authProvider: stubAuth },
+  );
+
+  const res = await i18nApp.request("/api/i18n_posts?locale=fr");
+  expect(res.status).toBe(200);
+  const rows = (await res.json()) as { id: string; title: string }[];
+  expect(rows).toHaveLength(3);
+  const ip1 = rows.find((r) => r.id === "ip1");
+  const ip2 = rows.find((r) => r.id === "ip2");
+  const ip3 = rows.find((r) => r.id === "ip3");
+  expect(ip1!.title).toBe("Bonjour en Français");
+  expect(ip2!.title).toBe("Monde en Français");
+  expect(ip3!.title).toBe("No translation"); // falls back to default locale value
+});
