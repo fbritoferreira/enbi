@@ -1,5 +1,14 @@
 # @enbi/cli
 
+## 0.10.0
+
+### Patch Changes
+
+- Updated dependencies [f73a205]
+  - @enbi/db@0.10.0
+  - @enbi/server@0.10.0
+  - @enbi/auth@0.10.0
+
 ## 0.9.0
 
 ### Patch Changes
