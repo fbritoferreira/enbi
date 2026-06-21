@@ -243,18 +243,26 @@ function mountCollection(
               `Relation target collection "${col.relations[field].collection}" is not registered.`,
             );
           }
+          // Collect distinct non-null/non-empty FK values as strings, matching the
+          // byId map key strategy below, so numeric PKs resolve correctly.
+          const fkToString = (v: unknown): string | null => {
+            if (typeof v === "string" && v !== "") return v;
+            if (typeof v === "number") return String(v);
+            return null;
+          };
           const fkValues = finalRows
-            .map((r) => r[field])
-            .filter((v): v is string => v != null && v !== "");
+            .map((r) => fkToString(r[field]))
+            .filter((v): v is string => v !== null);
           const fetched = await getRowsByIds(ctx.db, targetCol.table, targetCol.primaryKey, [
             ...new Set(fkValues),
           ]);
-          const byId = new Map(fetched.map((r) => [String(r[targetCol.primaryKey]), r]));
+          const pkToString = (v: unknown): string =>
+            typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+          const byId = new Map(fetched.map((r) => [pkToString(r[targetCol.primaryKey]), r]));
           for (const row of finalRows) {
             const r = row as Row;
-            const fk = r[field];
-            const fkStr = typeof fk === "string" ? fk : null;
-            const target = fkStr != null && fkStr !== "" ? byId.get(fkStr) : undefined;
+            const fkStr = fkToString(r[field]);
+            const target = fkStr !== null ? byId.get(fkStr) : undefined;
             (r as Record<string, unknown>)._expanded = {
               ...((r as Record<string, unknown>)._expanded as object | undefined),
               [field]: gateExpandedRow(targetCol, target, caller.role),

@@ -3,6 +3,12 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { EnbiDatabase, TranslationsTable } from "@enbi/db";
 import type { Row } from "./crud.ts";
 
+/** Derive a stable string entry ID from a row's `id` field. */
+function rowEntryId(row: Row): string {
+  const rawId = (row as Record<string, unknown>).id;
+  return typeof rawId === "string" ? rawId : JSON.stringify(rawId ?? "");
+}
+
 /**
  * Fetch all translations for a list of entry IDs in a single query.
  * Returns a Map keyed by entryId, each value being a { field: value } record.
@@ -52,14 +58,10 @@ export async function overlayTranslations(
   localized: string[],
 ): Promise<Row[]> {
   if (localized.length === 0) return rows;
-  const entryIds = rows.map((row) => {
-    const rawId = (row as Record<string, unknown>).id;
-    return typeof rawId === "string" ? rawId : JSON.stringify(rawId ?? "");
-  });
+  const entryIds = rows.map(rowEntryId);
   const translationMap = await readTranslationsBatch(db, table, collectionName, entryIds, locale);
   return rows.map((row) => {
-    const rawId = (row as Record<string, unknown>).id;
-    const entryId = typeof rawId === "string" ? rawId : JSON.stringify(rawId ?? "");
+    const entryId = rowEntryId(row);
     const translations = translationMap.get(entryId) ?? {};
     const overlaid = { ...row } as Record<string, unknown>;
     for (const field of localized) {
