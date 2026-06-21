@@ -1,5 +1,15 @@
 # @enbi/cli
 
+## 0.12.0
+
+### Patch Changes
+
+- Updated dependencies [ca40398]
+- Updated dependencies [30e1419]
+  - @enbi/server@0.12.0
+  - @enbi/auth@0.12.0
+  - @enbi/db@0.12.0
+
 ## 0.11.0
 
 ### Minor Changes

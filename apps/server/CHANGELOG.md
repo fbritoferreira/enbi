@@ -1,5 +1,20 @@
 # @enbi/server
 
+## 0.12.0
+
+### Minor Changes
+
+- 30e1419: Wire CKEditor image upload to `/api/admin_media` via a FileRepository upload adapter. Pasting, dropping, or inserting images in wysiwyg fields now uploads to the media library and embeds the absolute public URL. Auth via session cookie; no new dependencies.
+
+  Server hardening: uploads are capped at 10 MB (HTTP 413) and restricted to image MIME types — jpeg, png, gif, webp, avif (HTTP 415). The public serve route (`GET /api/media/:id`) now sets `X-Content-Type-Options: nosniff` and `Content-Disposition: inline`.
+
+### Patch Changes
+
+- ca40398: Batch relation-expand and i18n overlay queries in the list path to eliminate N+1 patterns (one `inArray` query per expand field, one per locale overlay). No API change.
+  - @enbi/auth@0.12.0
+  - @enbi/core@0.12.0
+  - @enbi/db@0.12.0
+
 ## 0.11.0
 
 ### Patch Changes
