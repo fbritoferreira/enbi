@@ -866,7 +866,7 @@ test("media: roundtrip — upload, list, serve, delete", async () => {
 
   // Upload
   const form = new FormData();
-  form.append("file", new Blob(["hello world"], { type: "text/plain" }), "hello.txt");
+  form.append("file", new Blob(["hello world"], { type: "image/png" }), "hello.png");
   const upload = await app.request("/api/admin_media", {
     method: "POST",
     body: form,
@@ -882,8 +882,8 @@ test("media: roundtrip — upload, list, serve, delete", async () => {
   };
   expect(id).toBeTruthy();
   expect(url).toBe(`/api/media/${id}`);
-  expect(filename).toBe("hello.txt");
-  expect(mime).toBe("text/plain");
+  expect(filename).toBe("hello.png");
+  expect(mime).toBe("image/png");
 
   // List
   const list = await app.request("/api/admin_media", { headers: { "x-role": "admin" } });
@@ -894,7 +894,7 @@ test("media: roundtrip — upload, list, serve, delete", async () => {
   // Serve (public — no auth header)
   const serve = await app.request(`/api/media/${id}`);
   expect(serve.status).toBe(200);
-  expect(serve.headers.get("content-type")).toBe("text/plain");
+  expect(serve.headers.get("content-type")).toBe("image/png");
   // Exact-bytes check: must equal uploaded payload precisely (not Buffer pool garbage)
   const buf = new Uint8Array(await serve.arrayBuffer());
   expect(buf.byteLength).toBe(11); // "hello world".length === 11
@@ -947,6 +947,100 @@ test("media: DELETE non-existent → 404", async () => {
     headers: { "x-role": "admin" },
   });
   expect(res.status).toBe(404);
+});
+
+test("media: POST file too large → 413", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  // 10MB + 1 byte
+  const bigBlob = new Blob([new Uint8Array(10 * 1024 * 1024 + 1)], { type: "image/png" });
+  const form = new FormData();
+  form.append("file", bigBlob, "big.png");
+  const res = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(413);
+});
+
+test("media: POST SVG → 415", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const form = new FormData();
+  form.append("file", new Blob(["<svg/>"], { type: "image/svg+xml" }), "bad.svg");
+  const res = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(415);
+});
+
+test("media: POST valid PNG → 201", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }),
+    "ok.png",
+  );
+  const res = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(res.status).toBe(201);
+});
+
+test("media: GET /api/media/:id sets nosniff header", async () => {
+  const mediaCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await mediaCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await mediaCtx.db.run(sql`CREATE TABLE _media (
+    id text PRIMARY KEY, filename text NOT NULL, mime text NOT NULL,
+    size integer NOT NULL, created_at text NOT NULL)`);
+  const app = await buildMediaApp(mediaCtx);
+
+  // Upload a file first
+  const form = new FormData();
+  form.append("file", new Blob(["px"], { type: "image/png" }), "px.png");
+  const upload = await app.request("/api/admin_media", {
+    method: "POST",
+    body: form,
+    headers: { "x-role": "admin" },
+  });
+  expect(upload.status).toBe(201);
+  const { id } = (await upload.json()) as { id: string };
+
+  // Serve and check security headers
+  const serve = await app.request(`/api/media/${id}`);
+  expect(serve.status).toBe(200);
+  expect(serve.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(serve.headers.get("content-disposition")).toBe("inline");
 });
 
 // ── Drafts / publish tests (TDD) ─────────────────────────────────────────────
