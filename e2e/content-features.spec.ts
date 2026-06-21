@@ -12,6 +12,9 @@ function mintKey(role: string): string {
     [BIN, "keys", "create", "--config", CONFIG, "--role", role, "--label", "e2e-features"],
     { encoding: "utf8" },
   );
+  if (res.status !== 0 || res.error) {
+    throw new Error(`key mint failed: ${res.stderr || res.error}`);
+  }
   const lines = res.stderr.trim().split("\n");
   return lines[lines.length - 1].trim();
 }

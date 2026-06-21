@@ -330,14 +330,16 @@ test("runUserCreate with --role sets the explicit role", async () => {
   };
   await syncSchema(ctx, config);
 
-  // Second user (first already created above won't exist in this fresh db).
-  await runUserCreate("bob@example.test", "password12345", { cwd: dir, role: "admin" });
+  // Use --role viewer (not admin): this is the FIRST user in a fresh db, so
+  // bootstrap would make them "admin" if the role-UPDATE branch never ran.
+  // Asserting "viewer" proves the explicit-role UPDATE actually executed.
+  await runUserCreate("bob@example.test", "password12345", { cwd: dir, role: "viewer" });
 
   const fresh = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
   const rows = await fresh.db.all<{ email: string; role: string }>(
     sql`SELECT email, role FROM user WHERE email = 'bob@example.test'`,
   );
-  expect(rows[0]?.role).toBe("admin");
+  expect(rows[0]?.role).toBe("viewer");
 });
 
 test("runUserSetRole changes an existing user's role", async () => {

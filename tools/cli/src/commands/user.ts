@@ -49,6 +49,9 @@ export async function runUserCreate(
 
   // If an explicit role was requested, apply it directly (overrides bootstrap logic).
   if (opts.role) {
+    if (!(opts.role in config.roles)) {
+      console.warn(`enbi: warning — role "${opts.role}" is not defined in enbi.config.ts roles.`);
+    }
     const userTable = authSchema(config.auth, ctx.dialect).user;
     await ctx.db
       .update(userTable as never)
@@ -84,6 +87,10 @@ export async function runUserSetRole(
 
   if (existing.length === 0) {
     throw new EnbiError("not_found", `No user with email "${email}".`);
+  }
+
+  if (!(role in config.roles)) {
+    console.warn(`enbi: warning — role "${role}" is not defined in enbi.config.ts roles.`);
   }
 
   await ctx.db

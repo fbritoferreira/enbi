@@ -57,3 +57,5 @@ to change a decision, add a new ADR that supersedes the old one (don't edit hist
 | [0049](0049-field-validation.md)                      | Per-collection field validation (required/type/min/max/pattern/enum)   | Accepted           |
 | [0050](0050-i18n.md)                                  | Field-level i18n via a `_translations` table + `?locale=` overlay      | Accepted           |
 | [0051](0051-admin-redesign-wysiwyg.md)                | Editorial Terminal design; first-run register; wysiwyg CKEditor widget | Accepted           |
+| [0052](0052-scheduled-publishing.md)                  | Scheduled publishing: read-time publish_at visibility gating           | Accepted           |
+| [0053](0053-cli-user-management.md)                   | `enbi user create`/`set-role` CLI for user management                  | Accepted           |
