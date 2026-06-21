@@ -29,7 +29,14 @@ export default defineEnbiConfig({
     ...(ssoProviders ? { ssoProviders } : {}),
   },
   roles: { admin: "*", viewer: "read" },
-  collections: [collection(posts, { name: "posts", title: "title", versioned: true })],
+  collections: [
+    collection(posts, {
+      name: "posts",
+      title: "title",
+      versioned: true,
+      validate: { title: { required: true } },
+    }),
+  ],
   admin: process.env.ENBI_E2E_ADMIN_ORIGIN
     ? { origin: process.env.ENBI_E2E_ADMIN_ORIGIN }
     : undefined,
