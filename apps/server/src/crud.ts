@@ -153,6 +153,23 @@ export async function getRow(
   return rows[0];
 }
 
+/**
+ * Fetch multiple rows by primary key using a single IN query.
+ * `ids` must be string representations of the PK values as stored in the
+ * column (e.g. stringify numbers before passing). Returns an empty array
+ * immediately when `ids` is empty, avoiding a degenerate `WHERE pk IN ()`.
+ */
+export async function getRowsByIds(
+  db: EnbiDatabase,
+  table: Table,
+  primaryKey: string,
+  ids: string[],
+): Promise<Row[]> {
+  if (ids.length === 0) return [];
+  const pkCol = pkColumn(table, primaryKey);
+  return (await db.select().from(table).where(inArray(pkCol, ids))) as Row[];
+}
+
 export async function insertRow(db: EnbiDatabase, table: Table, values: Row): Promise<void> {
   await db.insert(table).values(values as never);
 }

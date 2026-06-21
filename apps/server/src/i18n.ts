@@ -1,7 +1,58 @@
 // @enbi/server — field-level i18n helpers: overlay, read, write translations (ADR-0050).
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { EnbiDatabase, TranslationsTable } from "@enbi/db";
 import type { Row } from "./crud.ts";
+
+/**
+ * Derive a stable string entry ID from a row's `id` field.
+ * Rows with null/undefined or non-primitive IDs return an empty string,
+ * which will never match a translation entry — the row falls back to its
+ * base-locale value gracefully.
+ */
+function rowEntryId(row: Row): string {
+  const rawId = (row as Record<string, unknown>).id;
+  if (typeof rawId === "string") return rawId;
+  if (typeof rawId === "number") return String(rawId);
+  // Non-primitive or null/undefined ID: return "" so the translation lookup
+  // finds nothing and the row keeps its base-locale value.
+  return "";
+}
+
+/**
+ * Fetch all translations for a list of entry IDs in a single query.
+ * Returns a Map keyed by entryId, each value being a { field: value } record.
+ */
+export async function readTranslationsBatch(
+  db: EnbiDatabase,
+  table: TranslationsTable,
+  collectionName: string,
+  entryIds: string[],
+  locale: string,
+): Promise<Map<string, Record<string, string>>> {
+  if (entryIds.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(table)
+    .where(
+      and(
+        eq(table.collection, collectionName),
+        inArray(table.entryId, entryIds),
+        eq(table.locale, locale),
+      ),
+    );
+  const result = new Map<string, Record<string, string>>();
+  for (const row of rows as { entryId: string; field: string; value: string | null }[]) {
+    if (row.value !== null) {
+      let entry = result.get(row.entryId);
+      if (!entry) {
+        entry = {};
+        result.set(row.entryId, entry);
+      }
+      entry[row.field] = row.value;
+    }
+  }
+  return result;
+}
 
 /**
  * Overlay translation values from `_translations` onto `rows` for the given
@@ -9,8 +60,7 @@ import type { Row } from "./crud.ts";
  * and replace `row[field]` if found. Missing translations fall back to the
  * base row value (default-locale value is preserved).
  *
- * Note: performs one DB query per row (N+1). Acceptable for typical CMS page
- * sizes; documented as a known tradeoff in ADR-0050.
+ * Uses a single batched query for all rows (ADR-0054).
  */
 export async function overlayTranslations(
   db: EnbiDatabase,
@@ -21,20 +71,19 @@ export async function overlayTranslations(
   localized: string[],
 ): Promise<Row[]> {
   if (localized.length === 0) return rows;
-  const result: Row[] = [];
-  for (const row of rows) {
-    const rawId = (row as Record<string, unknown>).id;
-    const entryId = typeof rawId === "string" ? rawId : JSON.stringify(rawId ?? "");
-    const translations = await readTranslations(db, table, collectionName, entryId, locale);
+  const entryIds = [...new Set(rows.map(rowEntryId))];
+  const translationMap = await readTranslationsBatch(db, table, collectionName, entryIds, locale);
+  return rows.map((row) => {
+    const entryId = rowEntryId(row);
+    const translations = translationMap.get(entryId) ?? {};
     const overlaid = { ...row } as Record<string, unknown>;
     for (const field of localized) {
       if (Object.prototype.hasOwnProperty.call(translations, field)) {
         overlaid[field] = translations[field];
       }
     }
-    result.push(overlaid);
-  }
-  return result;
+    return overlaid;
+  });
 }
 
 /**

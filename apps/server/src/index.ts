@@ -19,6 +19,7 @@ import {
   deleteRow,
   type FilterOp,
   getRow,
+  getRowsByIds,
   insertRow,
   type ListFilter,
   listRows,
@@ -65,6 +66,31 @@ async function snapshot(ctx: EnbiDb, col: AnyCollection, entryId: string, caller
 }
 
 /**
+ * Apply the draft and scheduled public gates to an already-fetched row.
+ * Returns the row if it should be visible to `callerRole`, or null if it
+ * should be hidden. Pure function — no DB access (ADR-0054).
+ */
+function gateExpandedRow(
+  targetCol: AnyCollection,
+  row: Row | null | undefined,
+  callerRole: string,
+): Row | null {
+  if (!row) return null;
+  if (
+    targetCol.drafts &&
+    callerRole === PUBLIC_ROLE &&
+    row[targetCol.drafts.column] !== "published"
+  ) {
+    return null;
+  }
+  if (targetCol.scheduled && callerRole === PUBLIC_ROLE) {
+    const p = row[targetCol.scheduled.column];
+    if (typeof p === "string" && p > new Date().toISOString()) return null;
+  }
+  return row;
+}
+
+/**
  * Resolve a single expanded relation field value for `row`, applying the
  * target collection's draft gate so public callers never see draft rows
  * via expansion (ADR-0045).
@@ -77,27 +103,30 @@ async function resolveExpanded(
 ): Promise<Row | null> {
   if (fkValue == null || fkValue === "") return null;
   const expanded = await getRow(ctx.db, targetCol.table, targetCol.primaryKey, fkValue as string);
-  if (!expanded) return null;
-  // Draft gate: if the target collection has drafts enabled and the caller is
-  // public, hide any non-published target row (return null) so draft rows
-  // cannot be leaked via the expand path (ADR-0045).
-  if (
-    targetCol.drafts &&
-    callerRole === PUBLIC_ROLE &&
-    expanded[targetCol.drafts.column] !== "published"
-  ) {
-    return null;
-  }
-  // Scheduled gate: if the target collection has scheduled enabled and the
-  // caller is public, hide rows whose publish_at is set and in the future so
-  // future-scheduled rows cannot be leaked via the expand path (ADR-0052).
-  if (targetCol.scheduled && callerRole === PUBLIC_ROLE) {
-    const publishAt = expanded[targetCol.scheduled.column];
-    if (typeof publishAt === "string" && publishAt > new Date().toISOString()) {
-      return null;
-    }
-  }
-  return expanded;
+  return gateExpandedRow(targetCol, expanded, callerRole);
+}
+
+/**
+ * Convert a FK or PK value to a string for use as a Map key in the batch
+ * expand path. Returns null for null/undefined/empty-string (treated as
+ * "no FK set", mirroring the resolveExpanded guard). Non-string, non-number
+ * values are also treated as "no FK set" and return null.
+ */
+function fkToString(v: unknown): string | null {
+  if (typeof v === "string" && v !== "") return v;
+  if (typeof v === "number") return String(v);
+  return null;
+}
+
+/**
+ * Convert a PK column value to a string for use as a Map key in the batch
+ * expand path. Falls back to "" only for unexpected types; "" will never
+ * match a real FK value so any such entry is effectively unreachable.
+ */
+function pkToString(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return "";
 }
 
 function mountCollection(
@@ -237,12 +266,22 @@ function mountCollection(
               `Relation target collection "${col.relations[field].collection}" is not registered.`,
             );
           }
+          // Collect distinct non-null/non-empty FK values as strings, matching the
+          // byId map key strategy below, so numeric PKs resolve correctly.
+          const fkValues = finalRows
+            .map((r) => fkToString(r[field]))
+            .filter((v): v is string => v !== null);
+          const fetched = await getRowsByIds(ctx.db, targetCol.table, targetCol.primaryKey, [
+            ...new Set(fkValues),
+          ]);
+          const byId = new Map(fetched.map((r) => [pkToString(r[targetCol.primaryKey]), r]));
           for (const row of finalRows) {
             const r = row as Row;
-            const expanded = await resolveExpanded(ctx, targetCol, r[field], caller.role);
+            const fkStr = fkToString(r[field]);
+            const target = fkStr !== null ? byId.get(fkStr) : undefined;
             (r as Record<string, unknown>)._expanded = {
               ...((r as Record<string, unknown>)._expanded as object | undefined),
-              [field]: expanded,
+              [field]: gateExpandedRow(targetCol, target, caller.role),
             };
           }
         }
