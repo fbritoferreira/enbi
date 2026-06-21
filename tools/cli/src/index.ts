@@ -8,6 +8,7 @@ import { runGenerate } from "./commands/generate.ts";
 import { runKeys } from "./commands/keys.ts";
 import { runMigrate } from "./commands/migrate.ts";
 import { runStart } from "./commands/start.ts";
+import { runUserCreate, runUserSetRole } from "./commands/user.ts";
 
 export function getVersion(): string {
   return pkg.version;
@@ -64,6 +65,27 @@ export async function run(argv: string[]): Promise<void> {
         id: string | undefined,
         flags: CommonFlags & { role?: string; label?: string },
       ) => runKeys(action, id, { config: flags.config, role: flags.role, label: flags.label }),
+    );
+
+  cli
+    .command("user create <email> <password>", "Create a new user account")
+    .option("--config <path>", "Path to enbi.config.ts")
+    .option("--role <role>", "Role to assign (overrides bootstrap logic)")
+    .option("--name <name>", "Display name (defaults to email)")
+    .action(
+      (email: string, password: string, flags: CommonFlags & { role?: string; name?: string }) =>
+        runUserCreate(email, password, {
+          config: flags.config,
+          role: flags.role,
+          name: flags.name,
+        }),
+    );
+
+  cli
+    .command("user set-role <email> <role>", "Update an existing user's role")
+    .option("--config <path>", "Path to enbi.config.ts")
+    .action((email: string, role: string, flags: CommonFlags) =>
+      runUserSetRole(email, role, { config: flags.config }),
     );
 
   cli
