@@ -52,6 +52,15 @@ export function mountMedia(
   const dir = config.media?.dir ?? ".enbi/uploads";
   const store = diskStore(dir);
 
+  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+  const ALLOWED_MIME = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+  ]);
+
   // POST /api/admin_media — upload a file (admin only)
   app.post("/api/admin_media", async (c) => {
     await authorizeResource(auth, roles, RESOURCE, "create", c.req.raw.headers, MEDIA_OPTS);
@@ -60,12 +69,21 @@ export function mountMedia(
     if (!file || !(file instanceof File)) {
       throw new EnbiError("validation", "`file` is required and must be a file upload.");
     }
+    if (file.size > MAX_SIZE) {
+      throw new EnbiError("too_large", "File exceeds the 10MB limit.");
+    }
+    if (!ALLOWED_MIME.has(file.type)) {
+      throw new EnbiError(
+        "unsupported_media",
+        "File type is not allowed. Accepted: jpeg, png, gif, webp, avif.",
+      );
+    }
     const id = crypto.randomUUID();
     await store.put(id, Buffer.from(await file.arrayBuffer()));
     const row = {
       id,
       filename: file.name,
-      mime: file.type || "application/octet-stream",
+      mime: file.type,
       size: file.size,
       createdAt: new Date().toISOString(),
     };
@@ -101,6 +119,10 @@ export function mountMedia(
     if (rows.length === 0) throw new EnbiError("not_found", "Media not found.");
     const row = rows[0]!;
     const bytes = await store.get(id);
-    return c.body(new Uint8Array(bytes), 200, { "Content-Type": row.mime });
+    return c.body(new Uint8Array(bytes), 200, {
+      "Content-Type": row.mime,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": `inline; filename="${encodeURIComponent(row.filename)}"`,
+    });
   });
 }

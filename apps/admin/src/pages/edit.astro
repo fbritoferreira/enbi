@@ -16,7 +16,7 @@ import Admin from "../layouts/Admin.astro";
   <p class="error" id="err" hidden></p>
 
   <script>
-    import { enbiFetch, escapeHtml } from "../lib/api.ts";
+    import { enbiFetch, escapeHtml, apiBase } from "../lib/api.ts";
     const sp = new URLSearchParams(location.search);
     const name = sp.get("c") ?? "";
     const id = sp.get("id") ?? "new";
@@ -177,6 +177,36 @@ import Admin from "../layouts/Admin.astro";
               editor.model.document.on("change:data", () => {
                 hidden.value = editor.getData();
               });
+
+              // Wire image upload to /api/admin_media via FileRepository upload adapter.
+              // The classic build bundles FileRepository, Image, and ImageUpload.
+              type FileLoader = { file: Promise<File | null> };
+              type UploadAdapter = { upload(): Promise<{ default: string }>; abort(): void };
+              type FileRepositoryPlugin = { createUploadAdapter: ((loader: FileLoader) => UploadAdapter) | null };
+              const repo = (editor.plugins.get("FileRepository") as unknown) as FileRepositoryPlugin;
+              repo.createUploadAdapter = (loader: FileLoader): UploadAdapter => {
+                let currentController: AbortController | null = null;
+                return {
+                  upload: async () => {
+                    currentController = new AbortController();
+                    const file = await loader.file;
+                    if (!file) throw new Error("Upload cancelled");
+                    const fd = new FormData();
+                    fd.append("file", file);
+                    // raw fetch: enbiFetch forces application/json which breaks the multipart boundary
+                    const res = await fetch(`${apiBase()}/api/admin_media`, {
+                      method: "POST",
+                      credentials: "include",
+                      body: fd,
+                      signal: currentController.signal,
+                    });
+                    if (!res.ok) throw new Error(`media upload failed (${res.status})`);
+                    const json = (await res.json()) as { url: string };
+                    return { default: `${apiBase()}${json.url}` };
+                  },
+                  abort: () => { currentController?.abort(); },
+                };
+              };
             }).catch(console.error);
           }
         }

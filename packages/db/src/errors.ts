@@ -5,7 +5,9 @@ export type EnbiErrorCode =
   | "not_found"
   | "validation"
   | "conflict"
-  | "config";
+  | "config"
+  | "too_large"
+  | "unsupported_media";
 
 const STATUS: Record<EnbiErrorCode, number> = {
   unauthorized: 401,
@@ -14,6 +16,8 @@ const STATUS: Record<EnbiErrorCode, number> = {
   validation: 422,
   conflict: 409,
   config: 500,
+  too_large: 413,
+  unsupported_media: 415,
 };
 
 export class EnbiError extends Error {
