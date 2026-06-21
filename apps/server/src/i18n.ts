@@ -71,7 +71,7 @@ export async function overlayTranslations(
   localized: string[],
 ): Promise<Row[]> {
   if (localized.length === 0) return rows;
-  const entryIds = rows.map(rowEntryId);
+  const entryIds = [...new Set(rows.map(rowEntryId))];
   const translationMap = await readTranslationsBatch(db, table, collectionName, entryIds, locale);
   return rows.map((row) => {
     const entryId = rowEntryId(row);
