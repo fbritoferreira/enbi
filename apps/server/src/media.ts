@@ -83,7 +83,7 @@ export function mountMedia(
     const row = {
       id,
       filename: file.name,
-      mime: file.type || "application/octet-stream",
+      mime: file.type,
       size: file.size,
       createdAt: new Date().toISOString(),
     };
