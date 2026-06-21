@@ -16,7 +16,7 @@ import Admin from "../layouts/Admin.astro";
   <p class="error" id="err" hidden></p>
 
   <script>
-    import { enbiFetch, escapeHtml } from "../lib/api.ts";
+    import { enbiFetch, escapeHtml, apiBase } from "../lib/api.ts";
     const sp = new URLSearchParams(location.search);
     const name = sp.get("c") ?? "";
     const id = sp.get("id") ?? "new";
@@ -176,6 +176,29 @@ import Admin from "../layouts/Admin.astro";
               editor.setData(hidden.value);
               editor.model.document.on("change:data", () => {
                 hidden.value = editor.getData();
+              });
+
+              // Wire image upload to /api/admin_media via FileRepository upload adapter.
+              // The classic build bundles FileRepository, Image, and ImageUpload.
+              type FileLoader = { file: Promise<File> };
+              type UploadAdapter = { upload(): Promise<{ default: string }>; abort(): void };
+              type FileRepositoryPlugin = { createUploadAdapter: ((loader: FileLoader) => UploadAdapter) | null };
+              const repo = (editor.plugins.get("FileRepository") as unknown) as FileRepositoryPlugin;
+              repo.createUploadAdapter = (loader: FileLoader): UploadAdapter => ({
+                upload: async () => {
+                  const file = await loader.file;
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  const res = await fetch(`${apiBase()}/api/admin_media`, {
+                    method: "POST",
+                    credentials: "include",
+                    body: fd,
+                  });
+                  if (!res.ok) throw new Error(`media upload failed (${res.status})`);
+                  const json = (await res.json()) as { url: string };
+                  return { default: `${apiBase()}${json.url}` };
+                },
+                abort: () => {},
               });
             }).catch(console.error);
           }
