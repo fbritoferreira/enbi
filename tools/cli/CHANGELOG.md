@@ -1,5 +1,24 @@
 # @enbi/cli
 
+## 0.11.0
+
+### Minor Changes
+
+- d6f49ef: feat(cli): enbi user create / set-role — CLI user management (ADR-0053)
+
+  Adds `enbi user create <email> <password> [--role] [--name]` and
+  `enbi user set-role <email> <role>`. Password hashing is delegated to
+  better-auth's sign-up handler (in-process, no HTTP server required) so the
+  bcrypt pipeline is identical to a real sign-up. The `--role` flag applies a
+  direct drizzle UPDATE after creation. `set-role` throws a typed `not_found`
+  error when the email does not exist.
+
+### Patch Changes
+
+- @enbi/server@0.11.0
+- @enbi/auth@0.11.0
+- @enbi/db@0.11.0
+
 ## 0.10.0
 
 ### Patch Changes

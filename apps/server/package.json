@@ -1,6 +1,6 @@
 {
   "name": "@enbi/server",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Hono content API for enbi.",
   "homepage": "https://enbi-cms.com",
   "license": "GPL-2.0-only",

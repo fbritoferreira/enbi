@@ -1,5 +1,13 @@
 # @enbi/server
 
+## 0.11.0
+
+### Patch Changes
+
+- @enbi/auth@0.11.0
+- @enbi/core@0.11.0
+- @enbi/db@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes
