@@ -9,10 +9,12 @@ import {
   composeProviders,
   createAuth,
 } from "@enbi/auth";
+import { isNull, lte, or } from "drizzle-orm";
 import { listRevisions, restoreRevision, writeRevision } from "@enbi/core";
 import { Hono } from "hono";
 import { overlayTranslations, readTranslations, writeTranslations } from "./i18n.ts";
 import {
+  assertColumn,
   countRows,
   deleteRow,
   type FilterOp,
@@ -157,6 +159,16 @@ function mountCollection(
         filters.push({ column: col.drafts.column, op: "eq", value: "published" });
         match = "all";
       }
+      // Scheduled-publish gate (ADR-0052): public callers only see rows where the
+      // publish_at column IS NULL or <= now (UTC ISO-8601). This is expressed as a
+      // SQL predicate (extraWhere) so it is always AND-combined with user filters,
+      // even when match="any", regardless of the OR/AND mode chosen by the user.
+      let scheduleExtraWhere: import("drizzle-orm").SQL | undefined;
+      if (col.scheduled && caller.role === PUBLIC_ROLE) {
+        const nowIso = new Date().toISOString();
+        const schedCol = assertColumn(col.table, col.scheduled.column);
+        scheduleExtraWhere = or(isNull(schedCol), lte(schedCol, nowIso));
+      }
       const localeParam = q.locale;
       if (localeParam !== undefined && !configuredLocales.includes(localeParam)) {
         return c.json(
@@ -164,7 +176,7 @@ function mountCollection(
           400,
         );
       }
-      const total = await countRows(ctx.db, col.table, filters, match);
+      const total = await countRows(ctx.db, col.table, filters, match, scheduleExtraWhere);
       const rows = await listRows(ctx.db, col.table, {
         limit: effectiveLimit,
         offset,
@@ -173,6 +185,7 @@ function mountCollection(
         match,
         cursor,
         primaryKey: col.primaryKey,
+        extraWhere: scheduleExtraWhere,
       });
       c.header("X-Total-Count", String(total));
       if (
@@ -267,6 +280,14 @@ function mountCollection(
     // Draft gate: hide non-published rows from public callers (ADR-0045).
     if (col.drafts && caller.role === PUBLIC_ROLE && row[col.drafts.column] !== "published") {
       throw new EnbiError("not_found", `${col.name} not found.`);
+    }
+    // Scheduled-publish gate: hide rows whose publish_at is set and in the future
+    // from public callers (ADR-0052). Authenticated callers see all rows.
+    if (col.scheduled && caller.role === PUBLIC_ROLE) {
+      const publishAt = row[col.scheduled.column];
+      if (typeof publishAt === "string" && publishAt > new Date().toISOString()) {
+        throw new EnbiError("not_found", `${col.name} not found.`);
+      }
     }
     const q = c.req.query();
     const localeParam = q.locale;

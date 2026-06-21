@@ -2521,3 +2521,197 @@ test("security: GET translations/:locale of a DRAFT entry returns 404 to public;
   const data = (await admGet.json()) as Record<string, string>;
   expect(data.title).toBe("Titre brouillon");
 });
+
+// ── Scheduled publishing (ADR-0052) ─────────────────────────────────────────
+
+const events = sqliteTable("events", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  publish_at: text("publish_at"),
+});
+
+async function buildScheduledApp() {
+  const sCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await sCtx.db.run(sql`CREATE TABLE events (
+    id text PRIMARY KEY,
+    title text NOT NULL,
+    publish_at text
+  )`);
+  await sCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await sCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  const sApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(events, { name: "events", scheduled: true, public: ["read"] as const }),
+      ],
+    },
+    { db: sCtx, authProvider: stubAuth },
+  );
+  return { sApp, sCtx };
+}
+
+const PAST = "2020-01-01T00:00:00.000Z";
+const FUTURE = "2099-12-31T23:59:59.000Z";
+
+test("scheduled: public list hides future publish_at, shows null and past", async () => {
+  const { sApp, sCtx } = await buildScheduledApp();
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e1','Past event',${PAST})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e2','Future event',${FUTURE})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e3','No schedule',NULL)`);
+
+  const pub = await sApp.request("/api/events");
+  expect(pub.status).toBe(200);
+  const pubRows = (await pub.json()) as { id: string }[];
+  const pubIds = pubRows.map((r) => r.id).sort();
+  // Public sees past and null, not future
+  expect(pubIds).toContain("e1");
+  expect(pubIds).toContain("e3");
+  expect(pubIds).not.toContain("e2");
+});
+
+test("scheduled: X-Total-Count (public) reflects only visible rows", async () => {
+  const { sApp, sCtx } = await buildScheduledApp();
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e1','Past',${PAST})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e2','Future',${FUTURE})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e3','Null schedule',NULL)`);
+
+  const pub = await sApp.request("/api/events");
+  expect(pub.status).toBe(200);
+  // 2 visible: e1 (past) + e3 (null)
+  expect(pub.headers.get("X-Total-Count")).toBe("2");
+});
+
+test("scheduled: public GET of a future row → 404; admin GET → 200", async () => {
+  const { sApp, sCtx } = await buildScheduledApp();
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e-future','Future',${FUTURE})`);
+
+  const pub = await sApp.request("/api/events/e-future");
+  expect(pub.status).toBe(404);
+
+  const adm = await sApp.request("/api/events/e-future", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  expect(((await adm.json()) as { title: string }).title).toBe("Future");
+});
+
+test("scheduled: public GET of a past or null row → 200", async () => {
+  const { sApp, sCtx } = await buildScheduledApp();
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e-past','Past',${PAST})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e-null','No schedule',NULL)`);
+
+  const pastRes = await sApp.request("/api/events/e-past");
+  expect(pastRes.status).toBe(200);
+
+  const nullRes = await sApp.request("/api/events/e-null");
+  expect(nullRes.status).toBe(200);
+});
+
+test("scheduled: admin list sees all rows regardless of publish_at", async () => {
+  const { sApp, sCtx } = await buildScheduledApp();
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e1','Past',${PAST})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e2','Future',${FUTURE})`);
+  await sCtx.db.run(sql`INSERT INTO events VALUES ('e3','Null',NULL)`);
+
+  const adm = await sApp.request("/api/events", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  const rows = (await adm.json()) as { id: string }[];
+  expect(rows.map((r) => r.id).sort()).toEqual(["e1", "e2", "e3"]);
+  expect(adm.headers.get("X-Total-Count")).toBe("3");
+});
+
+test("scheduled + drafts: public sees a row only when published AND publish_at <= now", async () => {
+  // Table with both status + publish_at
+  const combined = sqliteTable("combined_events", {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    status: text("status").notNull(),
+    publish_at: text("publish_at"),
+  });
+  const cCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await cCtx.db.run(sql`CREATE TABLE combined_events (
+    id text PRIMARY KEY,
+    title text NOT NULL,
+    status text NOT NULL,
+    publish_at text
+  )`);
+  await cCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await cCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+
+  // published + future publish_at → hidden (schedule not reached)
+  await cCtx.db.run(
+    sql`INSERT INTO combined_events VALUES ('c1','Pub+Future','published',${FUTURE})`,
+  );
+  // published + past publish_at → visible
+  await cCtx.db.run(sql`INSERT INTO combined_events VALUES ('c2','Pub+Past','published',${PAST})`);
+  // draft + past publish_at → hidden (still a draft)
+  await cCtx.db.run(sql`INSERT INTO combined_events VALUES ('c3','Draft+Past','draft',${PAST})`);
+  // published + null publish_at → visible
+  await cCtx.db.run(sql`INSERT INTO combined_events VALUES ('c4','Pub+Null','published',NULL)`);
+
+  const cApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [
+        collection(combined, {
+          name: "combined_events",
+          drafts: true,
+          scheduled: true,
+          public: ["read"] as const,
+        }),
+      ],
+    },
+    { db: cCtx, authProvider: stubAuth },
+  );
+
+  const pub = await cApp.request("/api/combined_events");
+  expect(pub.status).toBe(200);
+  const pubIds = ((await pub.json()) as { id: string }[]).map((r) => r.id).sort();
+  // c2 (published+past) and c4 (published+null) visible
+  expect(pubIds).toEqual(["c2", "c4"]);
+  // c1 (published+future) and c3 (draft+past) hidden
+  expect(pubIds).not.toContain("c1");
+  expect(pubIds).not.toContain("c3");
+});
+
+test("scheduled: non-scheduled collection is unaffected — no publish_at filtering", async () => {
+  // Posts collection has no scheduled option → all rows visible without filter
+  const nsCtx = await createDb({ dialect: "sqlite", url: ":memory:" });
+  await nsCtx.db.run(
+    sql`CREATE TABLE posts (id text primary key, title text not null, views integer not null)`,
+  );
+  await nsCtx.db.run(sql`CREATE TABLE _revisions (
+    id text PRIMARY KEY, collection text NOT NULL, entry_id text NOT NULL,
+    version integer NOT NULL, snapshot text NOT NULL, author_id text, created_at text NOT NULL)`);
+  await nsCtx.db.run(sql`CREATE TABLE _api_keys (
+    id text PRIMARY KEY, hashed_key text NOT NULL, role text NOT NULL,
+    label text, created_at text NOT NULL, last_used_at text)`);
+  await nsCtx.db.run(sql`INSERT INTO posts VALUES ('p1','hello',1)`);
+
+  const nsApp = await createServer(
+    {
+      db: { dialect: "sqlite", url: ":memory:" },
+      auth: { secret: "x" },
+      roles: { admin: "*" },
+      collections: [collection(posts, { name: "posts" })],
+    },
+    { db: nsCtx, authProvider: stubAuth },
+  );
+
+  const adm = await nsApp.request("/api/posts", { headers: { "x-role": "admin" } });
+  expect(adm.status).toBe(200);
+  const rows = (await adm.json()) as { id: string }[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].id).toBe("p1");
+});

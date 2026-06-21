@@ -17,6 +17,8 @@ type CollectionMeta = {
   columns: ColumnMeta[];
   /** Draft/publish configuration. `false` means disabled. (ADR-0045) */
   drafts: { column: string } | false;
+  /** Scheduled-publish configuration. `false` means disabled. (ADR-0052) */
+  scheduled: { column: string } | false;
   /** FK relations declared on this collection. (ADR-0046) */
   relations: Record<string, { collection: string }>;
   /** Per-field validation rules for this collection. (ADR-0049) */
@@ -43,6 +45,7 @@ function metaOf(col: AnyCollection, i18n?: EnbiConfig["i18n"]): CollectionMeta {
     primaryKey: col.primaryKey,
     columns,
     drafts: col.drafts,
+    scheduled: col.scheduled,
     relations: col.relations,
     validate: col.validate,
     localized: col.localized,

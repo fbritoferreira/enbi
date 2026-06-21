@@ -34,6 +34,12 @@ export type ListOptions = {
   match?: "all" | "any";
   cursor?: string;
   primaryKey?: string;
+  /**
+   * An additional SQL clause AND-combined with the filter-derived where.
+   * Used by the scheduled-publish gate (ADR-0052) and any other server-level
+   * predicate that must be applied regardless of user-supplied filters.
+   */
+  extraWhere?: SQL;
 };
 
 export function assertColumn(table: Table, name: string): Column {
@@ -93,15 +99,20 @@ export async function listRows(
 ): Promise<Row[]> {
   let q = db.select().from(table).$dynamic();
   const filterWhere = whereFor(table, opts.filters, opts.match);
+  // Combine filter-derived where with any extra server-level predicate (AND).
+  const baseWhere =
+    filterWhere && opts.extraWhere
+      ? and(filterWhere, opts.extraWhere)
+      : (filterWhere ?? opts.extraWhere);
 
   if (opts.cursor !== undefined && opts.primaryKey !== undefined) {
     // Keyset pagination: add gt(pk, cursor) AND-combined with filter where-clause, order by pk asc.
     const pkCol = pkColumn(table, opts.primaryKey);
     const cursorClause = gt(pkCol, opts.cursor);
-    const where = filterWhere ? and(filterWhere, cursorClause) : cursorClause;
+    const where = baseWhere ? and(baseWhere, cursorClause) : cursorClause;
     q = q.where(where).orderBy(asc(pkCol));
   } else {
-    if (filterWhere) q = q.where(filterWhere);
+    if (baseWhere) q = q.where(baseWhere);
     if (opts.sort) {
       const col = assertColumn(table, opts.sort.column);
       q = q.orderBy(opts.sort.dir === "desc" ? desc(col) : asc(col));
@@ -118,9 +129,12 @@ export async function countRows(
   table: Table,
   filters?: ListFilter[],
   match?: "all" | "any",
+  extraWhere?: SQL,
 ): Promise<number> {
   let q = db.select({ n: count() }).from(table).$dynamic();
-  const where = whereFor(table, filters, match);
+  const filterWhere = whereFor(table, filters, match);
+  const where =
+    filterWhere && extraWhere ? and(filterWhere, extraWhere) : (filterWhere ?? extraWhere);
   if (where) q = q.where(where);
   const rows = (await q) as { n: number }[];
   return rows[0]?.n ?? 0;

@@ -47,6 +47,7 @@ import Admin from "../layouts/Admin.astro";
         primaryKey: string;
         columns: { name: string; type: string }[];
         drafts: { column: string } | false;
+        scheduled: { column: string } | false;
         relations: Record<string, { collection: string }>;
         validate: Record<string, FieldRule>;
         localized: string[];
@@ -123,7 +124,9 @@ import Admin from "../layouts/Admin.astro";
           const isPk = c.name === col.primaryKey;
           const isRequired = Boolean(col.validate[c.name]?.required);
           const isWysiwyg = col.widgets?.[c.name] === "wysiwyg";
-          const labelText = escapeHtml(c.name) + (isRequired ? " <span class='req'>*</span>" : "");
+          const isScheduleCol = col.scheduled && col.scheduled.column === c.name;
+          const scheduleLabel = isScheduleCol ? " <span style='font-size:0.85em;color:var(--muted);'>(schedule)</span>" : "";
+          const labelText = escapeHtml(c.name) + scheduleLabel + (isRequired ? " <span class='req'>*</span>" : "");
 
           if (isRelation && !isPk) {
             const targetName = col.relations[c.name].collection;
