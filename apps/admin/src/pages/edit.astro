@@ -185,9 +185,10 @@ import Admin from "../layouts/Admin.astro";
               type FileRepositoryPlugin = { createUploadAdapter: ((loader: FileLoader) => UploadAdapter) | null };
               const repo = (editor.plugins.get("FileRepository") as unknown) as FileRepositoryPlugin;
               repo.createUploadAdapter = (loader: FileLoader): UploadAdapter => {
-                const controller = new AbortController();
+                let currentController: AbortController | null = null;
                 return {
                   upload: async () => {
+                    currentController = new AbortController();
                     const file = await loader.file;
                     if (!file) throw new Error("Upload cancelled");
                     const fd = new FormData();
@@ -197,13 +198,13 @@ import Admin from "../layouts/Admin.astro";
                       method: "POST",
                       credentials: "include",
                       body: fd,
-                      signal: controller.signal,
+                      signal: currentController.signal,
                     });
                     if (!res.ok) throw new Error(`media upload failed (${res.status})`);
                     const json = (await res.json()) as { url: string };
                     return { default: `${apiBase()}${json.url}` };
                   },
-                  abort: () => { controller.abort(); },
+                  abort: () => { currentController?.abort(); },
                 };
               };
             }).catch(console.error);

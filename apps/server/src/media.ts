@@ -122,7 +122,7 @@ export function mountMedia(
     return c.body(new Uint8Array(bytes), 200, {
       "Content-Type": row.mime,
       "X-Content-Type-Options": "nosniff",
-      "Content-Disposition": "inline",
+      "Content-Disposition": `inline; filename="${encodeURIComponent(row.filename)}"`,
     });
   });
 }

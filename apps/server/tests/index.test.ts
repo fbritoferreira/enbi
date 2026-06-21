@@ -1040,7 +1040,7 @@ test("media: GET /api/media/:id sets nosniff header", async () => {
   const serve = await app.request(`/api/media/${id}`);
   expect(serve.status).toBe(200);
   expect(serve.headers.get("x-content-type-options")).toBe("nosniff");
-  expect(serve.headers.get("content-disposition")).toBe("inline");
+  expect(serve.headers.get("content-disposition")).toMatch(/^inline; filename=/);
 });
 
 // ── Drafts / publish tests (TDD) ─────────────────────────────────────────────
