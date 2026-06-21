@@ -5,12 +5,10 @@ code — your repo holds only your database config, your custom content types, a
 config. The `enbi` CLI boots the content server and admin UI from your dependencies; you never
 vendor the framework source.
 
-**Headline features**
+**Headline features:** drizzle-defined collections (Postgres, SQLite, MySQL), full content-revision history, drafts, scheduled publishing, i18n, relations, per-field validation, WYSIWYG block editor, media uploads, webhooks, API keys with RBAC, and session auth via better-auth (email/password, GitHub, Google, OIDC/SSO).
 
-- **Full content history** — every save writes a complete versioned snapshot, so any entry can
-  be diffed and restored.
-- **Auth via better-auth** — sessions, providers, and SSO, configured by you.
-- **Drizzle-defined content** — model your content types in code; Postgres, SQLite, and MySQL.
+→ **[Getting Started](docs/getting-started.md)** — install, configure, run, create your first admin.  
+→ **[Architecture Decision Records](docs/adr/)** — the reasoning behind every design choice.
 
 ## This repository
 

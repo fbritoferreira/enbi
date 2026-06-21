@@ -273,3 +273,113 @@ test("run routes `migrate` and surfaces a missing-config error", async () => {
     process.chdir(cwd);
   }
 });
+
+// ---------------------------------------------------------------------------
+// enbi user create / user set-role
+// ---------------------------------------------------------------------------
+
+function tmpUserConfig(dbPath: string): { dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "enbi-user-"));
+  writeFileSync(
+    join(dir, "enbi.config.ts"),
+    `export default {
+  db: { dialect: "sqlite", url: "file:${dbPath.replaceAll("\\\\", "/")}" },
+  auth: { secret: "user-tests-secret-at-least-32-chars!", baseURL: "http://localhost" },
+  roles: { admin: "*", viewer: "read" },
+  collections: [],
+};`,
+  );
+  return { dir };
+}
+
+test("runUserCreate creates a user row with the given email", async () => {
+  const { runUserCreate } = await import("../src/commands/user.ts");
+  const dbFile = join(mkdtempSync(join(tmpdir(), "enbi-user-db-")), "u.db");
+  const { dir } = tmpUserConfig(dbFile);
+
+  // Create tables via syncSchema first.
+  const ctx = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const config: EnbiConfig = {
+    db: { dialect: "sqlite", url: `file:${dbFile}` },
+    auth: { secret: "user-tests-secret-at-least-32-chars!", baseURL: "http://localhost" },
+    roles: { admin: "*", viewer: "read" as const },
+    collections: [],
+  };
+  await syncSchema(ctx, config);
+
+  await runUserCreate("alice@example.test", "password12345", { cwd: dir });
+
+  const fresh = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const rows = await fresh.db.all<{ email: string; role: string }>(
+    sql`SELECT email, role FROM user`,
+  );
+  expect(rows.some((r) => r.email === "alice@example.test")).toBeTruthy();
+});
+
+test("runUserCreate with --role sets the explicit role", async () => {
+  const { runUserCreate } = await import("../src/commands/user.ts");
+  const dbFile = join(mkdtempSync(join(tmpdir(), "enbi-user-db-")), "u.db");
+  const { dir } = tmpUserConfig(dbFile);
+
+  const ctx = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const config: EnbiConfig = {
+    db: { dialect: "sqlite", url: `file:${dbFile}` },
+    auth: { secret: "user-tests-secret-at-least-32-chars!", baseURL: "http://localhost" },
+    roles: { admin: "*", viewer: "read" as const },
+    collections: [],
+  };
+  await syncSchema(ctx, config);
+
+  // Second user (first already created above won't exist in this fresh db).
+  await runUserCreate("bob@example.test", "password12345", { cwd: dir, role: "admin" });
+
+  const fresh = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const rows = await fresh.db.all<{ email: string; role: string }>(
+    sql`SELECT email, role FROM user WHERE email = 'bob@example.test'`,
+  );
+  expect(rows[0]?.role).toBe("admin");
+});
+
+test("runUserSetRole changes an existing user's role", async () => {
+  const { runUserCreate, runUserSetRole } = await import("../src/commands/user.ts");
+  const dbFile = join(mkdtempSync(join(tmpdir(), "enbi-user-db-")), "u.db");
+  const { dir } = tmpUserConfig(dbFile);
+
+  const ctx = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const config: EnbiConfig = {
+    db: { dialect: "sqlite", url: `file:${dbFile}` },
+    auth: { secret: "user-tests-secret-at-least-32-chars!", baseURL: "http://localhost" },
+    roles: { admin: "*", viewer: "read" as const },
+    collections: [],
+  };
+  await syncSchema(ctx, config);
+
+  // First user becomes admin via bootstrap; then demote.
+  await runUserCreate("charlie@example.test", "password12345", { cwd: dir });
+  await runUserSetRole("charlie@example.test", "viewer", { cwd: dir });
+
+  const fresh = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const rows = await fresh.db.all<{ email: string; role: string }>(
+    sql`SELECT email, role FROM user WHERE email = 'charlie@example.test'`,
+  );
+  expect(rows[0]?.role).toBe("viewer");
+});
+
+test("runUserSetRole on a missing email rejects with not_found", async () => {
+  const { runUserSetRole } = await import("../src/commands/user.ts");
+  const dbFile = join(mkdtempSync(join(tmpdir(), "enbi-user-db-")), "u.db");
+  const { dir } = tmpUserConfig(dbFile);
+
+  const ctx = await createDb({ dialect: "sqlite", url: `file:${dbFile}` });
+  const config: EnbiConfig = {
+    db: { dialect: "sqlite", url: `file:${dbFile}` },
+    auth: { secret: "user-tests-secret-at-least-32-chars!", baseURL: "http://localhost" },
+    roles: { admin: "*", viewer: "read" as const },
+    collections: [],
+  };
+  await syncSchema(ctx, config);
+
+  await expect(runUserSetRole("nobody@example.test", "admin", { cwd: dir })).rejects.toMatchObject({
+    code: "not_found",
+  });
+});
