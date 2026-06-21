@@ -3,10 +3,19 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { EnbiDatabase, TranslationsTable } from "@enbi/db";
 import type { Row } from "./crud.ts";
 
-/** Derive a stable string entry ID from a row's `id` field. */
+/**
+ * Derive a stable string entry ID from a row's `id` field.
+ * Rows with null/undefined or non-primitive IDs return an empty string,
+ * which will never match a translation entry — the row falls back to its
+ * base-locale value gracefully.
+ */
 function rowEntryId(row: Row): string {
   const rawId = (row as Record<string, unknown>).id;
-  return typeof rawId === "string" ? rawId : JSON.stringify(rawId ?? "");
+  if (typeof rawId === "string") return rawId;
+  if (typeof rawId === "number") return String(rawId);
+  // Non-primitive or null/undefined ID: return "" so the translation lookup
+  // finds nothing and the row keeps its base-locale value.
+  return "";
 }
 
 /**
@@ -34,8 +43,12 @@ export async function readTranslationsBatch(
   const result = new Map<string, Record<string, string>>();
   for (const row of rows as { entryId: string; field: string; value: string | null }[]) {
     if (row.value !== null) {
-      if (!result.has(row.entryId)) result.set(row.entryId, {});
-      result.get(row.entryId)![row.field] = row.value;
+      let entry = result.get(row.entryId);
+      if (!entry) {
+        entry = {};
+        result.set(row.entryId, entry);
+      }
+      entry[row.field] = row.value;
     }
   }
   return result;

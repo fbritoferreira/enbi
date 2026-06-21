@@ -106,6 +106,29 @@ async function resolveExpanded(
   return gateExpandedRow(targetCol, expanded, callerRole);
 }
 
+/**
+ * Convert a FK or PK value to a string for use as a Map key in the batch
+ * expand path. Returns null for null/undefined/empty-string (treated as
+ * "no FK set", mirroring the resolveExpanded guard). Non-string, non-number
+ * values are also treated as "no FK set" and return null.
+ */
+function fkToString(v: unknown): string | null {
+  if (typeof v === "string" && v !== "") return v;
+  if (typeof v === "number") return String(v);
+  return null;
+}
+
+/**
+ * Convert a PK column value to a string for use as a Map key in the batch
+ * expand path. Falls back to "" only for unexpected types; "" will never
+ * match a real FK value so any such entry is effectively unreachable.
+ */
+function pkToString(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return "";
+}
+
 function mountCollection(
   app: Hono,
   ctx: EnbiDb,
@@ -245,19 +268,12 @@ function mountCollection(
           }
           // Collect distinct non-null/non-empty FK values as strings, matching the
           // byId map key strategy below, so numeric PKs resolve correctly.
-          const fkToString = (v: unknown): string | null => {
-            if (typeof v === "string" && v !== "") return v;
-            if (typeof v === "number") return String(v);
-            return null;
-          };
           const fkValues = finalRows
             .map((r) => fkToString(r[field]))
             .filter((v): v is string => v !== null);
           const fetched = await getRowsByIds(ctx.db, targetCol.table, targetCol.primaryKey, [
             ...new Set(fkValues),
           ]);
-          const pkToString = (v: unknown): string =>
-            typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
           const byId = new Map(fetched.map((r) => [pkToString(r[targetCol.primaryKey]), r]));
           for (const row of finalRows) {
             const r = row as Row;

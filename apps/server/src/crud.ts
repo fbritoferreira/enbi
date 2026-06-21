@@ -153,6 +153,12 @@ export async function getRow(
   return rows[0];
 }
 
+/**
+ * Fetch multiple rows by primary key using a single IN query.
+ * `ids` must be string representations of the PK values as stored in the
+ * column (e.g. stringify numbers before passing). Returns an empty array
+ * immediately when `ids` is empty, avoiding a degenerate `WHERE pk IN ()`.
+ */
 export async function getRowsByIds(
   db: EnbiDatabase,
   table: Table,
