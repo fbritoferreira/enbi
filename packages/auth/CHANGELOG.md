@@ -1,5 +1,11 @@
 # @enbi/auth
 
+## 0.12.0
+
+### Patch Changes
+
+- @enbi/db@0.12.0
+
 ## 0.11.0
 
 ### Patch Changes
