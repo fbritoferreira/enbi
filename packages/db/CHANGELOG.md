@@ -1,5 +1,25 @@
 # @enbi/db
 
+## 0.8.0
+
+### Minor Changes
+
+- [#31](https://github.com/fbritoferreira/enbi/pull/31) [`61fb8c7`](https://github.com/fbritoferreira/enbi/commit/61fb8c725c457c89e1202825039eac22d8976617) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - feat: per-collection field validation (ADR-0049)
+
+  Add `validate` option to `CollectionOptions` / `Collection` with a `FieldRule`
+  type supporting `required`, `type`, `min`, `max`, `pattern`, and `enum`
+  constraints. The server validates POST and PUT bodies before any DB write and
+  returns 422 with a structured `details` array of field-level errors on failure.
+  The admin UI marks required fields with a `*` in the label.
+
+- [#32](https://github.com/fbritoferreira/enbi/pull/32) [`a711f81`](https://github.com/fbritoferreira/enbi/commit/a711f81ce055c89fbd0d635a67f6501eea1242ff) Thanks [@fbritoferreira](https://github.com/fbritoferreira)! - feat: field-level i18n via `_translations` table (ADR-0050)
+
+  Add opt-in `localized` fields to collections and a `_translations` side-table
+  storing per-locale field overrides. The server overlays translations on GET
+  responses when `?locale=` is supplied, and exposes `GET/PUT
+/api/:col/:id/translations/:locale` endpoints. The admin edit page gains a
+  locale switcher that loads and saves translations for non-default locales.
+
 ## 0.7.0
 
 ### Minor Changes

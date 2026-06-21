@@ -1,6 +1,6 @@
 {
   "name": "@enbi/auth",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "better-auth wiring for enbi (sessions, providers, SSO).",
   "license": "GPL-2.0-only",
   "repository": {
